@@ -1,0 +1,44 @@
+# Binaries
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+bin/
+dist/
+
+# Test binary / coverage
+*.test
+*.out
+cover.out
+
+# Dependency directories
+vendor/
+go.work
+go.work.sum
+
+# E2E / tool binaries (kubectl, kind, clusterctl, envtest assets)
+.e2e-bin/
+testbin/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Kubernetes / local kubeconfigs
+*.kubeconfig
+kubeconfig
+
+# Local env / secrets
+.env
+*.local
+
+# Claude Agent SDK tooling — project-local, never pushed.
+# CLAUDE.md, the agents/skills, ADRs (.claude/decisions), and spike notes
+# (.claude/notes) all live here and stay out of git. See .claude/PROJECT_CONTEXT.md.
+.claude/
+CLAUDE.md
+**/CLAUDE.md
