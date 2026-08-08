@@ -1,31 +1,36 @@
-# Build the manager binary
-FROM docker.io/golang:1.23 AS builder
+# syntax=docker/dockerfile:1.7
+# Build the manager binary.
+#
+# golang:1.25-bookworm pinned by digest — keep the tag in sync with go.mod's `go`
+# directive and bump the digest via renovate/dependabot.
+FROM golang:1.25-bookworm@sha256:908f8ff2ec296df2f349563072c7925775cd28b50361a52ed834a8a37399b9bf AS builder
 ARG TARGETOS
 ARG TARGETARCH
+ARG VERSION=dev
+ARG COMMIT=unknown
 
 WORKDIR /workspace
-# Copy the Go Modules manifests
+# Copy the Go module manifests and download deps first so source changes don't
+# invalidate the cached module layer.
 COPY go.mod go.mod
 COPY go.sum go.sum
-# cache deps before building and copying source so that we don't need to re-download as much
-# and so that source changes don't invalidate our downloaded layer
 RUN go mod download
 
-# Copy the go source
+# Copy the go source.
 COPY cmd/main.go cmd/main.go
 COPY api/ api/
 COPY internal/ internal/
 
-# Build
-# the GOARCH has not a default value to allow the binary be built according to the host where the command
-# was called. For example, if we call make docker-build in a local env which has the Apple Silicon M1 SO
-# the docker BUILDPLATFORM arg will be linux/arm64 when for Apple x86 it will be linux/amd64. Therefore,
-# by leaving it empty we can ensure that the container and binary shipped on it will have the same platform.
-RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -a -o manager cmd/main.go
+# Reproducible, stripped build. GOARCH comes from buildx (TARGETARCH) so a single
+# Dockerfile builds every platform; -trimpath + -buildvcs=false drop local paths and
+# VCS stamps for reproducibility; -s -w strip debug info; version/commit are stamped in.
+RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} \
+    go build -trimpath -buildvcs=false \
+      -ldflags="-s -w -X main.version=${VERSION} -X main.commit=${COMMIT}" \
+      -o manager cmd/main.go
 
-# Use distroless as minimal base image to package the manager binary
-# Refer to https://github.com/GoogleContainerTools/distroless for more details
-FROM gcr.io/distroless/static:nonroot
+# distroless/static:nonroot pinned by digest — minimal, no shell, runs as non-root.
+FROM gcr.io/distroless/static:nonroot@sha256:f7f8f729987ad0fdf6b05eeeae94b26e6a0f613bdf46feea7fc40f7bd72953e6
 WORKDIR /
 COPY --from=builder /workspace/manager .
 USER 65532:65532

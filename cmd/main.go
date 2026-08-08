@@ -45,6 +45,10 @@ import (
 var (
 	scheme   = runtime.NewScheme()
 	setupLog = ctrl.Log.WithName("setup")
+
+	// version and commit are stamped at build time via -ldflags (see Dockerfile).
+	version = "dev"
+	commit  = "unknown"
 )
 
 func init() {
@@ -243,7 +247,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	setupLog.Info("starting manager")
+	setupLog.Info("starting manager", "version", version, "commit", commit)
 	if err := mgr.Start(ctrl.SetupSignalHandler()); err != nil {
 		setupLog.Error(err, "problem running manager")
 		os.Exit(1)
