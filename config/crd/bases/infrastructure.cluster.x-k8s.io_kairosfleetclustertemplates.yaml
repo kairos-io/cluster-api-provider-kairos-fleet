@@ -1,0 +1,144 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.17.2
+  name: kairosfleetclustertemplates.infrastructure.cluster.x-k8s.io
+spec:
+  group: infrastructure.cluster.x-k8s.io
+  names:
+    categories:
+    - cluster-api
+    kind: KairosFleetClusterTemplate
+    listKind: KairosFleetClusterTemplateList
+    plural: kairosfleetclustertemplates
+    singular: kairosfleetclustertemplate
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: |-
+          KairosFleetClusterTemplate is the Schema for the kairosfleetclustertemplates API. It is
+          used by ClusterClass to stamp out KairosFleetCluster resources.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: KairosFleetClusterTemplateSpec defines the desired state
+              of KairosFleetClusterTemplate.
+            properties:
+              template:
+                description: template is the KairosFleetCluster resource stamped out
+                  for each cluster.
+                properties:
+                  metadata:
+                    description: metadata is the standard object metadata stamped
+                      onto the created KairosFleetCluster.
+                    minProperties: 1
+                    properties:
+                      annotations:
+                        additionalProperties:
+                          type: string
+                        description: |-
+                          annotations is an unstructured key value map stored with a resource that may be
+                          set by external tools to store and retrieve arbitrary metadata. They are not
+                          queryable and should be preserved when modifying objects.
+                          More info: http://kubernetes.io/docs/user-guide/annotations
+                        type: object
+                      labels:
+                        additionalProperties:
+                          type: string
+                        description: |-
+                          labels is a map of string keys and values that can be used to organize and categorize
+                          (scope and select) objects. May match selectors of replication controllers
+                          and services.
+                          More info: http://kubernetes.io/docs/user-guide/labels
+                        type: object
+                    type: object
+                  spec:
+                    description: spec is the specification stamped onto the created
+                      KairosFleetCluster.
+                    properties:
+                      auroraboot:
+                        description: |-
+                          auroraboot describes the AuroraBoot fleet manager connection shared by all machines
+                          belonging to this cluster.
+                        properties:
+                          adminTokenSecretRef:
+                            description: |-
+                              adminTokenSecretRef references a Secret in the same namespace as the KairosFleetCluster
+                              holding the AuroraBoot admin bearer token. The token is read from the Secret's "token"
+                              data key and is never written to logs.
+                            properties:
+                              name:
+                                description: name is the name of the referenced Secret.
+                                minLength: 1
+                                type: string
+                            required:
+                            - name
+                            type: object
+                          url:
+                            description: url is the base URL of the AuroraBoot fleet
+                              API, e.g. "https://auroraboot.example:8080".
+                            minLength: 1
+                            type: string
+                        required:
+                        - adminTokenSecretRef
+                        - url
+                        type: object
+                      controlPlaneEndpoint:
+                        description: |-
+                          controlPlaneEndpoint represents the endpoint used to communicate with the control
+                          plane. For a fleet cluster the endpoint is operator-supplied (for example a kube-vip
+                          VIP or a managed load balancer); this provider does not allocate it. It may be set at
+                          creation or filled in later — status.initialization.provisioned gates on it being set.
+                        minProperties: 1
+                        properties:
+                          host:
+                            description: host is the hostname on which the API server
+                              is serving.
+                            maxLength: 512
+                            minLength: 1
+                            type: string
+                          port:
+                            description: port is the port on which the API server
+                              is serving.
+                            format: int32
+                            maximum: 65535
+                            minimum: 1
+                            type: integer
+                        type: object
+                    required:
+                    - auroraboot
+                    type: object
+                required:
+                - spec
+                type: object
+            required:
+            - template
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources: {}

@@ -1,0 +1,12 @@
+# clusterctl release metadata for the Cluster API Kairos Fleet infrastructure provider.
+# Maps each release series to the Cluster API contract it implements, so clusterctl
+# can verify compatibility with the management cluster's core provider.
+#
+# The v0.1.x series targets Cluster API v1.13 and implements the v1beta2 infrastructure
+# contract (see the CRD label cluster.x-k8s.io/v1beta2: v1alpha1).
+apiVersion: clusterctl.cluster.x-k8s.io/v1alpha3
+kind: Metadata
+releaseSeries:
+  - major: 0
+    minor: 1
+    contract: v1beta2

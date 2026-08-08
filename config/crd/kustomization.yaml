@@ -1,0 +1,28 @@
+# This kustomization.yaml is not intended to be run by itself,
+# since it depends on service name and namespace that are out of this kustomize package.
+# It should be run by config/default
+resources:
+- bases/infrastructure.cluster.x-k8s.io_kairosfleetclusters.yaml
+- bases/infrastructure.cluster.x-k8s.io_kairosfleetmachines.yaml
+- bases/infrastructure.cluster.x-k8s.io_kairosfleetclustertemplates.yaml
+- bases/infrastructure.cluster.x-k8s.io_kairosfleetmachinetemplates.yaml
+# +kubebuilder:scaffold:crdkustomizeresource
+
+# Declare the Cluster API contract implemented by these CRDs. The value is the CRD
+# API version(s) that satisfy the contract. This provider targets CAPI v1.13 and
+# implements the v1beta2 infrastructure contract with its v1alpha1 types, so it
+# advertises only v1beta2 (it does not implement the legacy v1beta1 contract).
+labels:
+- includeSelectors: false
+  pairs:
+    cluster.x-k8s.io/v1beta2: v1alpha1
+
+patches:
+# [WEBHOOK] To enable webhook, uncomment all the sections with [WEBHOOK] prefix.
+# patches here are for enabling the conversion webhook for each CRD
+# +kubebuilder:scaffold:crdkustomizewebhookpatch
+
+# [WEBHOOK] To enable webhook, uncomment the following section
+# the following config is for teaching kustomize how to do kustomization for CRDs.
+#configurations:
+#- kustomizeconfig.yaml
