@@ -152,12 +152,14 @@ func (r *KairosFleetMachineReconciler) reconcileNormal(ctx context.Context, flee
 		annotations.AddAnnotations(fleetMachine, map[string]string{infrav1.NodeIDAnnotation: node.ID})
 		log.Info("Claimed AuroraBoot node", "nodeID", node.ID, "group", fleetMachine.Spec.Group)
 		r.notReady(fleetMachine, "NodeClaimed", "Claimed an AuroraBoot node; applying bootstrap configuration")
-		// Requeue so the annotation is persisted before we apply the config.
-		return ctrl.Result{Requeue: true}, nil
+		// Return without an explicit requeue: the deferred patch persists the node-id
+		// annotation, and the watch on KairosFleetMachine re-triggers reconcile to
+		// apply the config.
+		return ctrl.Result{}, nil
 	}
 
 	// 3. Apply the bootstrap cloud-config (once) — passed through unmodified.
-	if fleetMachine.Annotations[cloudConfigAppliedAnnotation] != "true" {
+	if fleetMachine.Annotations[cloudConfigAppliedAnnotation] != cloudConfigAppliedValue {
 		data, err := r.bootstrapData(ctx, machine)
 		if err != nil {
 			return ctrl.Result{}, err
@@ -165,7 +167,7 @@ func (r *KairosFleetMachineReconciler) reconcileNormal(ctx context.Context, flee
 		if _, err := fc.ApplyCloudConfig(ctx, nodeID, data); err != nil {
 			return ctrl.Result{}, fmt.Errorf("applying cloud-config to node %s: %w", nodeID, err)
 		}
-		annotations.AddAnnotations(fleetMachine, map[string]string{cloudConfigAppliedAnnotation: "true"})
+		annotations.AddAnnotations(fleetMachine, map[string]string{cloudConfigAppliedAnnotation: cloudConfigAppliedValue})
 		log.Info("Applied bootstrap cloud-config", "nodeID", nodeID)
 		r.notReady(fleetMachine, "ApplyingCloudConfig", "Bootstrap cloud-config applied; waiting for the node to reboot and rejoin")
 		return ctrl.Result{RequeueAfter: waitForRejoinRequeue}, nil

@@ -2,6 +2,7 @@ name: Tests
 
 on:
   push:
+    branches: [main]
   pull_request:
 
 # Least privilege: these jobs only read the repo.

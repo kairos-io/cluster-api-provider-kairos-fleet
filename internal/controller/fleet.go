@@ -38,8 +38,9 @@ const (
 
 	// cloudConfigAppliedAnnotation marks that the bootstrap cloud-config has been
 	// handed to AuroraBoot for the claimed node, so a level-triggered reconcile does
-	// not re-apply it.
+	// not re-apply it. Its presence is signalled by cloudConfigAppliedValue.
 	cloudConfigAppliedAnnotation = "kairos-fleet.infrastructure.cluster.x-k8s.io/cloud-config-applied"
+	cloudConfigAppliedValue      = "true"
 
 	// rebootRequestedAtAnnotation records (RFC3339) when the controller issued the
 	// reboot that applies the staged cloud-config, so rejoin can be detected as a

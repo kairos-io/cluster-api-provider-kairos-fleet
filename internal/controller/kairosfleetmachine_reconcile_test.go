@@ -165,10 +165,9 @@ func TestMachineReconcile_ClaimsThenApplies(t *testing.T) {
 	}
 	r, c := newReconciler(t, fc, testFixture(true))
 
-	// First reconcile: claims and records the node-id annotation, then requeues.
-	if res := reconcileKFM(t, r); !res.Requeue {
-		t.Fatalf("expected requeue after claim")
-	}
+	// First reconcile: claims and records the node-id annotation (the watch on the
+	// annotation update drives the next reconcile).
+	reconcileKFM(t, r)
 	if len(fc.Claims) != 1 || fc.Claims[0].ClaimKey != "kfm-uid" {
 		t.Fatalf("expected one claim with claimKey=kfm-uid, got %+v", fc.Claims)
 	}
