@@ -34,10 +34,10 @@ Cluster API  ──▶  KairosFleet* (this provider)  ──▶  AuroraBoot flee
 
 ## Target versions
 
-- Cluster API: v1.11+ (v1beta2 contracts)
-- Kubernetes (management + workload): v1.34+
+- Cluster API: v1.13+ (v1beta2 contracts)
+- Kubernetes (management + workload): v1.36+
 - AuroraBoot: the fleet API (`/api/v1`), node claim + addresses + reset lifecycle
-- Kairos: v3.6.0+
+- Kairos: latest stable (currently v4.1.2)
 
 ## Development
 
