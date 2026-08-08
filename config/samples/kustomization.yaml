@@ -1,0 +1,7 @@
+## Append samples of your project ##
+resources:
+- infrastructure_v1alpha1_kairosfleetcluster.yaml
+- infrastructure_v1alpha1_kairosfleetmachine.yaml
+- infrastructure_v1alpha1_kairosfleetclustertemplate.yaml
+- infrastructure_v1alpha1_kairosfleetmachinetemplate.yaml
+# +kubebuilder:scaffold:manifestskustomizesamples

@@ -1,0 +1,113 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.17.2
+  name: kairosfleetmachinetemplates.infrastructure.cluster.x-k8s.io
+spec:
+  group: infrastructure.cluster.x-k8s.io
+  names:
+    categories:
+    - cluster-api
+    kind: KairosFleetMachineTemplate
+    listKind: KairosFleetMachineTemplateList
+    plural: kairosfleetmachinetemplates
+    singular: kairosfleetmachinetemplate
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - description: Target AuroraBoot group
+      jsonPath: .spec.template.spec.group
+      name: Group
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: |-
+          KairosFleetMachineTemplate is the Schema for the kairosfleetmachinetemplates API. It is
+          used by MachineDeployments and MachineSets to stamp out KairosFleetMachine resources.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: KairosFleetMachineTemplateSpec defines the desired state
+              of KairosFleetMachineTemplate.
+            properties:
+              template:
+                description: |-
+                  template is the KairosFleetMachine resource stamped out for each machine in a
+                  MachineDeployment or MachineSet.
+                properties:
+                  metadata:
+                    description: metadata is the standard object metadata stamped
+                      onto the created KairosFleetMachine.
+                    minProperties: 1
+                    properties:
+                      annotations:
+                        additionalProperties:
+                          type: string
+                        description: |-
+                          annotations is an unstructured key value map stored with a resource that may be
+                          set by external tools to store and retrieve arbitrary metadata. They are not
+                          queryable and should be preserved when modifying objects.
+                          More info: http://kubernetes.io/docs/user-guide/annotations
+                        type: object
+                      labels:
+                        additionalProperties:
+                          type: string
+                        description: |-
+                          labels is a map of string keys and values that can be used to organize and categorize
+                          (scope and select) objects. May match selectors of replication controllers
+                          and services.
+                          More info: http://kubernetes.io/docs/user-guide/labels
+                        type: object
+                    type: object
+                  spec:
+                    description: spec is the specification stamped onto the created
+                      KairosFleetMachine.
+                    properties:
+                      group:
+                        description: |-
+                          group is the AuroraBoot group to claim a node from. The group must already exist in
+                          AuroraBoot and hold enrolled, unclaimed nodes; an empty group yields a transient
+                          "waiting for capacity" state rather than a failure.
+                        minLength: 1
+                        type: string
+                      providerID:
+                        description: |-
+                          providerID is the identifier for the claimed AuroraBoot node, in the form
+                          "kairos-fleet://<id>". It is SET BY THE CONTROLLER after a node is claimed and its
+                          kubelet reports the matching value; it is immutable once set. Users must not set it.
+                        type: string
+                    required:
+                    - group
+                    type: object
+                required:
+                - spec
+                type: object
+            required:
+            - template
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources: {}
