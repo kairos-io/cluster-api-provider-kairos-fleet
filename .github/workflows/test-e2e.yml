@@ -1,9 +1,11 @@
 name: E2E Tests
 
+# The current e2e suite is the kubebuilder scaffold placeholder (deploy the manager
+# to kind + probe metrics) — it does not exercise the fleet flow, which needs an
+# AuroraBoot instance and Kairos nodes. Run it manually until a real fleet e2e lands;
+# it must not gate PRs. Tracked as a follow-up.
 on:
-  push:
-    branches: [main]
-  pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -27,7 +29,7 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
-          go-version-file: go.mod
+          go-version: "1.26"
           check-latest: true
 
       - name: Install kind (pinned + checksum-verified)
