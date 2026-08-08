@@ -41,6 +41,11 @@ const (
 	// not re-apply it.
 	cloudConfigAppliedAnnotation = "kairos-fleet.infrastructure.cluster.x-k8s.io/cloud-config-applied"
 
+	// rebootRequestedAtAnnotation records (RFC3339) when the controller issued the
+	// reboot that applies the staged cloud-config, so rejoin can be detected as a
+	// node heartbeat newer than this time.
+	rebootRequestedAtAnnotation = "kairos-fleet.infrastructure.cluster.x-k8s.io/reboot-requested-at"
+
 	// providerIDPrefix is the scheme for KairosFleetMachine provider IDs. The node
 	// identifier is the AuroraBoot node ID (see ADR 0001 §3).
 	providerIDPrefix = "kairos-fleet://"

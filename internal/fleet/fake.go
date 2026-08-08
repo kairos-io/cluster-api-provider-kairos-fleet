@@ -30,11 +30,13 @@ type FakeClient struct {
 	ClaimFunc            func(ctx context.Context, groupID, claimKey string) (*Node, error)
 	GetNodeFunc          func(ctx context.Context, nodeID string) (*Node, error)
 	ApplyCloudConfigFunc func(ctx context.Context, nodeID, cloudConfig string) (*Command, error)
+	RebootFunc           func(ctx context.Context, nodeID string) (*Command, error)
 	GetCommandsFunc      func(ctx context.Context, nodeID string) ([]Command, error)
 	ReleaseFunc          func(ctx context.Context, nodeID, claimKey string) (bool, error)
 
 	Claims   []ClaimCall
 	Applies  []ApplyCall
+	Reboots  []string
 	Releases []ReleaseCall
 }
 
@@ -84,6 +86,16 @@ func (f *FakeClient) ApplyCloudConfig(ctx context.Context, nodeID, cloudConfig s
 		return f.ApplyCloudConfigFunc(ctx, nodeID, cloudConfig)
 	}
 	return &Command{ID: "fake-cmd", Command: CommandApplyCloudConfig, Phase: CommandPhasePending}, nil
+}
+
+func (f *FakeClient) Reboot(ctx context.Context, nodeID string) (*Command, error) {
+	f.mu.Lock()
+	f.Reboots = append(f.Reboots, nodeID)
+	f.mu.Unlock()
+	if f.RebootFunc != nil {
+		return f.RebootFunc(ctx, nodeID)
+	}
+	return &Command{ID: "fake-reboot", Command: CommandReboot, Phase: CommandPhasePending}, nil
 }
 
 func (f *FakeClient) GetCommands(ctx context.Context, nodeID string) ([]Command, error) {

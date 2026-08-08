@@ -171,7 +171,33 @@ func (r *KairosFleetMachineReconciler) reconcileNormal(ctx context.Context, flee
 		return ctrl.Result{RequeueAfter: waitForRejoinRequeue}, nil
 	}
 
-	// 4. Wait for the apply-cloud-config command to complete and the node to be Online.
+	// 4. Once the apply-cloud-config command has completed, reboot the node so it
+	// processes the staged /oem config (apply-cloud-config writes the file but does
+	// not reboot).
+	if fleetMachine.Annotations[rebootRequestedAtAnnotation] == "" {
+		applied, failed, failMsg := r.applyState(ctx, fc, nodeID)
+		if failed {
+			r.fail(fleetMachine, "CloudConfigFailed", fmt.Sprintf("apply-cloud-config failed on node %s: %s", nodeID, failMsg))
+			return ctrl.Result{}, nil
+		}
+		if !applied {
+			log.Info("Waiting for apply-cloud-config to complete on node", "nodeID", nodeID)
+			r.notReady(fleetMachine, "ApplyingCloudConfig", "Waiting for the node to write the bootstrap cloud-config")
+			return ctrl.Result{RequeueAfter: waitForRejoinRequeue}, nil
+		}
+		if _, err := fc.Reboot(ctx, nodeID); err != nil {
+			return ctrl.Result{}, fmt.Errorf("rebooting node %s: %w", nodeID, err)
+		}
+		annotations.AddAnnotations(fleetMachine, map[string]string{
+			rebootRequestedAtAnnotation: time.Now().UTC().Format(time.RFC3339),
+		})
+		log.Info("Requested node reboot to apply cloud-config", "nodeID", nodeID)
+		r.notReady(fleetMachine, "Rebooting", "Rebooting the node to apply its bootstrap configuration")
+		return ctrl.Result{RequeueAfter: waitForRejoinRequeue}, nil
+	}
+
+	// 5. Wait for the node to reboot and rejoin: Online with a heartbeat newer than
+	// the reboot request.
 	node, err := fc.GetNode(ctx, nodeID)
 	if err != nil {
 		if fleet.IsNotFound(err) {
@@ -180,18 +206,13 @@ func (r *KairosFleetMachineReconciler) reconcileNormal(ctx context.Context, flee
 		}
 		return ctrl.Result{}, fmt.Errorf("getting node %s: %w", nodeID, err)
 	}
-	applied, failed, failMsg := r.applyState(ctx, fc, nodeID)
-	if failed {
-		r.fail(fleetMachine, "CloudConfigFailed", fmt.Sprintf("apply-cloud-config failed on node %s: %s", nodeID, failMsg))
-		return ctrl.Result{}, nil
-	}
-	if !applied || node.Phase != fleet.PhaseOnline {
-		log.Info("Waiting for node to rejoin", "nodeID", nodeID, "phase", node.Phase, "applyCompleted", applied)
-		r.notReady(fleetMachine, "WaitingForNodeRejoin", "Waiting for the node to finish applying its config, reboot and report Online")
+	if !r.rejoinedAfterReboot(fleetMachine, node) {
+		log.Info("Waiting for node to rejoin after reboot", "nodeID", nodeID, "phase", node.Phase)
+		r.notReady(fleetMachine, "WaitingForNodeRejoin", "Waiting for the node to reboot and report Online")
 		return ctrl.Result{RequeueAfter: waitForRejoinRequeue}, nil
 	}
 
-	// 5. Provisioned: publish providerID + addresses and mark ready.
+	// 6. Provisioned: publish providerID + addresses and mark ready.
 	providerID := providerIDPrefix + node.ID
 	fleetMachine.Spec.ProviderID = ptr.To(providerID)
 	fleetMachine.Status.Addresses = addressesFromNode(node)
@@ -232,6 +253,20 @@ func (r *KairosFleetMachineReconciler) reconcileDelete(ctx context.Context, flee
 
 	controllerutil.RemoveFinalizer(fleetMachine, infrav1.KairosFleetMachineFinalizer)
 	return ctrl.Result{}, nil
+}
+
+// rejoinedAfterReboot reports whether the node has come back Online after the reboot
+// the controller requested — detected as a heartbeat newer than the recorded reboot
+// time, so a level-triggered reconcile need not catch the transient Offline.
+func (r *KairosFleetMachineReconciler) rejoinedAfterReboot(fleetMachine *infrav1.KairosFleetMachine, node *fleet.Node) bool {
+	if node.Phase != fleet.PhaseOnline || node.LastHeartbeat == nil {
+		return false
+	}
+	rebootedAt, err := time.Parse(time.RFC3339, fleetMachine.Annotations[rebootRequestedAtAnnotation])
+	if err != nil {
+		return false
+	}
+	return node.LastHeartbeat.After(rebootedAt)
 }
 
 // applyState reports whether the apply-cloud-config command completed and, if it

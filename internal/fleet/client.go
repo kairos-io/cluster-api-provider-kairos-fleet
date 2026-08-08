@@ -36,9 +36,10 @@ const (
 )
 
 // Node command names recognised by the AuroraBoot server / phone-home agent.
-// Mirrors AuroraBoot pkg/store CmdApplyCloudConfig / CmdReset.
+// Mirrors AuroraBoot pkg/store CmdApplyCloudConfig / CmdReboot / CmdReset.
 const (
 	CommandApplyCloudConfig = "apply-cloud-config"
+	CommandReboot           = "reboot"
 	CommandReset            = "reset"
 
 	// ApplyCloudConfigArg is the command argument key the agent reads the
@@ -90,8 +91,13 @@ type Client interface {
 	GetNode(ctx context.Context, nodeID string) (*Node, error)
 
 	// ApplyCloudConfig queues an apply-cloud-config command carrying the (unmodified)
-	// bootstrap cloud-config for the node to apply across a reboot.
+	// bootstrap cloud-config. The agent writes it to /oem and does NOT reboot, so the
+	// caller must issue Reboot afterwards for the config to take effect.
 	ApplyCloudConfig(ctx context.Context, nodeID, cloudConfig string) (*Command, error)
+
+	// Reboot queues a reboot command so the node processes a previously applied
+	// cloud-config (which is staged under /oem and only applied on boot).
+	Reboot(ctx context.Context, nodeID string) (*Command, error)
 
 	// GetCommands returns the commands queued/executed for a node, newest state
 	// included, so the controller can observe an apply-cloud-config reaching

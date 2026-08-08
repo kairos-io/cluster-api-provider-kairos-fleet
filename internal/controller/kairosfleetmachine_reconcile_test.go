@@ -19,6 +19,7 @@ package controller
 import (
 	"context"
 	"testing"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -185,13 +186,15 @@ func TestMachineReconcile_ClaimsThenApplies(t *testing.T) {
 	}
 }
 
-func TestMachineReconcile_ProvisionsWhenOnline(t *testing.T) {
+func TestMachineReconcile_RebootsThenProvisions(t *testing.T) {
+	// Heartbeat clearly after the reboot request, so rejoin is detected.
+	hb := time.Now().Add(time.Hour)
 	fc := &fleet.FakeClient{
 		ClaimFunc: func(_ context.Context, _, _ string) (*fleet.Node, error) {
 			return &fleet.Node{ID: testNodeID, Hostname: testHostname, Phase: fleet.PhaseOnline}, nil
 		},
 		GetNodeFunc: func(_ context.Context, _ string) (*fleet.Node, error) {
-			return &fleet.Node{ID: testNodeID, Hostname: testHostname, Phase: fleet.PhaseOnline}, nil
+			return &fleet.Node{ID: testNodeID, Hostname: testHostname, Phase: fleet.PhaseOnline, LastHeartbeat: &hb}, nil
 		},
 		GetCommandsFunc: func(_ context.Context, _ string) ([]fleet.Command, error) {
 			return []fleet.Command{{Command: fleet.CommandApplyCloudConfig, Phase: fleet.CommandPhaseCompleted}}, nil
@@ -199,9 +202,13 @@ func TestMachineReconcile_ProvisionsWhenOnline(t *testing.T) {
 	}
 	r, c := newReconciler(t, fc, testFixture(true))
 
-	// Claim -> apply -> provisioned.
+	// Claim -> apply -> reboot -> provisioned.
 	reconcileKFM(t, r) // claim
 	reconcileKFM(t, r) // apply
+	reconcileKFM(t, r) // reboot (apply command completed)
+	if len(fc.Reboots) != 1 || fc.Reboots[0] != testNodeID {
+		t.Fatalf("expected one reboot of %s, got %+v", testNodeID, fc.Reboots)
+	}
 	reconcileKFM(t, r) // provisioned
 
 	kfm := getKFM(t, c)
@@ -214,6 +221,26 @@ func TestMachineReconcile_ProvisionsWhenOnline(t *testing.T) {
 	}
 	if len(kfm.Status.Addresses) != 1 || kfm.Status.Addresses[0].Address != testHostname {
 		t.Fatalf("expected hostname address %q, got %+v", testHostname, kfm.Status.Addresses)
+	}
+}
+
+func TestMachineReconcile_WaitsForApplyBeforeReboot(t *testing.T) {
+	fc := &fleet.FakeClient{
+		ClaimFunc: func(_ context.Context, _, _ string) (*fleet.Node, error) {
+			return &fleet.Node{ID: testNodeID, Hostname: testHostname, Phase: fleet.PhaseOnline}, nil
+		},
+		GetCommandsFunc: func(_ context.Context, _ string) ([]fleet.Command, error) {
+			// apply-cloud-config still running -> must not reboot yet.
+			return []fleet.Command{{Command: fleet.CommandApplyCloudConfig, Phase: fleet.CommandPhaseRunning}}, nil
+		},
+	}
+	r, _ := newReconciler(t, fc, testFixture(true))
+
+	reconcileKFM(t, r) // claim
+	reconcileKFM(t, r) // apply
+	reconcileKFM(t, r) // apply command not complete -> no reboot
+	if len(fc.Reboots) != 0 {
+		t.Fatalf("did not expect a reboot before apply-cloud-config completes, got %+v", fc.Reboots)
 	}
 }
 

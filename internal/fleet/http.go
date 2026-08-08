@@ -134,11 +134,16 @@ func (c *httpClient) GetNode(ctx context.Context, nodeID string) (*Node, error) 
 }
 
 func (c *httpClient) ApplyCloudConfig(ctx context.Context, nodeID, cloudConfig string) (*Command, error) {
+	return c.sendCommand(ctx, nodeID, CommandApplyCloudConfig, map[string]string{ApplyCloudConfigArg: cloudConfig})
+}
+
+func (c *httpClient) Reboot(ctx context.Context, nodeID string) (*Command, error) {
+	return c.sendCommand(ctx, nodeID, CommandReboot, nil)
+}
+
+func (c *httpClient) sendCommand(ctx context.Context, nodeID, command string, args map[string]string) (*Command, error) {
 	var out commandDTO
-	body := createCommandDTO{
-		Command: CommandApplyCloudConfig,
-		Args:    map[string]string{ApplyCloudConfigArg: cloudConfig},
-	}
+	body := createCommandDTO{Command: command, Args: args}
 	if err := c.do(ctx, http.MethodPost, "/api/v1/nodes/"+nodeID+"/commands", body, &out); err != nil {
 		return nil, err
 	}
