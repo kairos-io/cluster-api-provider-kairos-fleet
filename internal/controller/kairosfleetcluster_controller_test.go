@@ -51,7 +51,12 @@ var _ = Describe("KairosFleetCluster Controller", func() {
 						Name:      resourceName,
 						Namespace: "default",
 					},
-					// TODO(user): Specify other spec details if needed.
+					Spec: infrastructurev1alpha1.KairosFleetClusterSpec{
+						AuroraBoot: infrastructurev1alpha1.AuroraBootConnection{
+							URL:                 "https://auroraboot.example",
+							AdminTokenSecretRef: infrastructurev1alpha1.LocalSecretReference{Name: "ab-token"},
+						},
+					},
 				}
 				Expect(k8sClient.Create(ctx, resource)).To(Succeed())
 			}

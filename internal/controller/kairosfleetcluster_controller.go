@@ -18,46 +18,142 @@ package controller
 
 import (
 	"context"
+	"time"
 
+	"k8s.io/apimachinery/pkg/api/meta"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/utils/ptr"
+	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta2"
+	"sigs.k8s.io/cluster-api/util"
+	"sigs.k8s.io/cluster-api/util/annotations"
+	"sigs.k8s.io/cluster-api/util/patch"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
-	infrastructurev1alpha1 "github.com/kairos-io/cluster-api-provider-kairos-fleet/api/v1alpha1"
+	infrav1 "github.com/kairos-io/cluster-api-provider-kairos-fleet/api/v1alpha1"
 )
 
-// KairosFleetClusterReconciler reconciles a KairosFleetCluster object
+// KairosFleetClusterReconciler reconciles a KairosFleetCluster object.
 type KairosFleetClusterReconciler struct {
 	client.Client
-	Scheme *runtime.Scheme
+	Scheme             *runtime.Scheme
+	FleetClientFactory FleetClientFactory
 }
 
 // +kubebuilder:rbac:groups=infrastructure.cluster.x-k8s.io,resources=kairosfleetclusters,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=infrastructure.cluster.x-k8s.io,resources=kairosfleetclusters/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=infrastructure.cluster.x-k8s.io,resources=kairosfleetclusters/finalizers,verbs=update
+// +kubebuilder:rbac:groups=cluster.x-k8s.io,resources=clusters;clusters/status,verbs=get;list;watch
+// +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch
 
-// Reconcile is part of the main kubernetes reconciliation loop which aims to
-// move the current state of the cluster closer to the desired state.
-// TODO(user): Modify the Reconcile function to compare the state specified by
-// the KairosFleetCluster object against the actual cluster state, and then
-// perform operations to make the cluster state reflect the state specified by
-// the user.
-//
-// For more details, check Reconcile and its Result here:
-// - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.20.4/pkg/reconcile
-func (r *KairosFleetClusterReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	_ = logf.FromContext(ctx)
+// Reconcile satisfies the Cluster API v1beta2 InfraCluster contract: it validates the
+// AuroraBoot connection and sets status.initialization.provisioned once the
+// control-plane endpoint is present.
+func (r *KairosFleetClusterReconciler) Reconcile(ctx context.Context, req ctrl.Request) (_ ctrl.Result, reterr error) {
+	log := logf.FromContext(ctx)
 
-	// TODO(user): your logic here
+	fleetCluster := &infrav1.KairosFleetCluster{}
+	if err := r.Get(ctx, req.NamespacedName, fleetCluster); err != nil {
+		return ctrl.Result{}, client.IgnoreNotFound(err)
+	}
 
+	// Resolve the owning CAPI Cluster (set via owner reference by the Cluster controller).
+	cluster, err := util.GetOwnerCluster(ctx, r.Client, fleetCluster.ObjectMeta)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+	if cluster == nil {
+		log.Info("Waiting for Cluster owner reference to be set")
+		return ctrl.Result{}, nil
+	}
+
+	patchHelper, err := patch.NewHelper(fleetCluster, r.Client)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+	defer func() {
+		if err := patchHelper.Patch(ctx, fleetCluster); err != nil && reterr == nil {
+			reterr = err
+		}
+	}()
+
+	if annotations.IsPaused(cluster, fleetCluster) {
+		log.Info("Reconciliation is paused")
+		return ctrl.Result{}, nil
+	}
+
+	if !controllerutil.ContainsFinalizer(fleetCluster, infrav1.KairosFleetClusterFinalizer) {
+		controllerutil.AddFinalizer(fleetCluster, infrav1.KairosFleetClusterFinalizer)
+	}
+
+	if !fleetCluster.DeletionTimestamp.IsZero() {
+		// The InfraCluster owns no external infrastructure of its own (per-machine
+		// nodes are released by the KairosFleetMachine controller), so there is
+		// nothing to tear down here.
+		controllerutil.RemoveFinalizer(fleetCluster, infrav1.KairosFleetClusterFinalizer)
+		return ctrl.Result{}, nil
+	}
+
+	// Validate the AuroraBoot connection (the admin-token Secret must exist).
+	if _, err := resolveFleetClient(ctx, r.Client, r.fleetFactory(), fleetCluster); err != nil {
+		log.Info("AuroraBoot connection not ready", "reason", err.Error())
+		setCondition(&fleetCluster.Status.Conditions, fleetCluster.Generation,
+			clusterv1.ReadyCondition, metav1.ConditionFalse, "AuroraBootConnectionNotReady",
+			"Waiting for a valid AuroraBoot connection")
+		fleetCluster.Status.Initialization.Provisioned = ptr.To(false)
+		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+	}
+
+	// The control-plane endpoint is operator-supplied for a fleet cluster; gate
+	// readiness on it being present (ADR 0001 §5).
+	if fleetCluster.Spec.ControlPlaneEndpoint == nil || fleetCluster.Spec.ControlPlaneEndpoint.Host == "" {
+		log.Info("Waiting for control plane endpoint")
+		setCondition(&fleetCluster.Status.Conditions, fleetCluster.Generation,
+			clusterv1.ReadyCondition, metav1.ConditionFalse, "WaitingForControlPlaneEndpoint",
+			"Waiting for spec.controlPlaneEndpoint to be set")
+		fleetCluster.Status.Initialization.Provisioned = ptr.To(false)
+		return ctrl.Result{}, nil
+	}
+
+	fleetCluster.Status.Initialization.Provisioned = ptr.To(true)
+	setCondition(&fleetCluster.Status.Conditions, fleetCluster.Generation,
+		clusterv1.ReadyCondition, metav1.ConditionTrue, "Provisioned",
+		"Infrastructure cluster is provisioned")
 	return ctrl.Result{}, nil
+}
+
+func (r *KairosFleetClusterReconciler) fleetFactory() FleetClientFactory {
+	if r.FleetClientFactory != nil {
+		return r.FleetClientFactory
+	}
+	return DefaultFleetClientFactory
 }
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *KairosFleetClusterReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
-		For(&infrastructurev1alpha1.KairosFleetCluster{}).
-		Named("kairosfleetcluster").
+		For(&infrav1.KairosFleetCluster{}).
+		Watches(
+			&clusterv1.Cluster{},
+			handler.EnqueueRequestsFromMapFunc(
+				util.ClusterToInfrastructureMapFunc(
+					context.Background(), infrav1.GroupVersion.WithKind("KairosFleetCluster"), mgr.GetClient(), &infrav1.KairosFleetCluster{}),
+			),
+		).
 		Complete(r)
+}
+
+// meta.SetStatusCondition wrapper that stamps ObservedGeneration.
+func setCondition(conds *[]metav1.Condition, generation int64, condType string, status metav1.ConditionStatus, reason, message string) {
+	meta.SetStatusCondition(conds, metav1.Condition{
+		Type:               condType,
+		Status:             status,
+		ObservedGeneration: generation,
+		Reason:             reason,
+		Message:            message,
+	})
 }

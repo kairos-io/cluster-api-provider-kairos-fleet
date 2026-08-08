@@ -18,46 +18,317 @@ package controller
 
 import (
 	"context"
+	"fmt"
+	"time"
 
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/meta"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/utils/ptr"
+	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta2"
+	"sigs.k8s.io/cluster-api/util"
+	"sigs.k8s.io/cluster-api/util/annotations"
+	"sigs.k8s.io/cluster-api/util/patch"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
-	infrastructurev1alpha1 "github.com/kairos-io/cluster-api-provider-kairos-fleet/api/v1alpha1"
+	infrav1 "github.com/kairos-io/cluster-api-provider-kairos-fleet/api/v1alpha1"
+	"github.com/kairos-io/cluster-api-provider-kairos-fleet/internal/fleet"
 )
 
-// KairosFleetMachineReconciler reconciles a KairosFleetMachine object
+// Requeue intervals for the staged claim -> apply -> rejoin lifecycle.
+const (
+	waitForCapacityRequeue = 30 * time.Second
+	waitForRejoinRequeue   = 15 * time.Second
+)
+
+// KairosFleetMachineReconciler reconciles a KairosFleetMachine object.
 type KairosFleetMachineReconciler struct {
 	client.Client
-	Scheme *runtime.Scheme
+	Scheme             *runtime.Scheme
+	FleetClientFactory FleetClientFactory
 }
 
 // +kubebuilder:rbac:groups=infrastructure.cluster.x-k8s.io,resources=kairosfleetmachines,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=infrastructure.cluster.x-k8s.io,resources=kairosfleetmachines/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=infrastructure.cluster.x-k8s.io,resources=kairosfleetmachines/finalizers,verbs=update
+// +kubebuilder:rbac:groups=infrastructure.cluster.x-k8s.io,resources=kairosfleetclusters,verbs=get;list;watch
+// +kubebuilder:rbac:groups=cluster.x-k8s.io,resources=machines;machines/status,verbs=get;list;watch
+// +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch
 
-// Reconcile is part of the main kubernetes reconciliation loop which aims to
-// move the current state of the cluster closer to the desired state.
-// TODO(user): Modify the Reconcile function to compare the state specified by
-// the KairosFleetMachine object against the actual cluster state, and then
-// perform operations to make the cluster state reflect the state specified by
-// the user.
-//
-// For more details, check Reconcile and its Result here:
-// - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.20.4/pkg/reconcile
-func (r *KairosFleetMachineReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	_ = logf.FromContext(ctx)
+// Reconcile drives the KairosFleetMachine state machine: wait for bootstrap data,
+// claim an AuroraBoot node, apply the bootstrap cloud-config, wait for the node to
+// rejoin, then set providerID/addresses and mark it provisioned. On delete it releases
+// the claimed node before removing the finalizer.
+func (r *KairosFleetMachineReconciler) Reconcile(ctx context.Context, req ctrl.Request) (_ ctrl.Result, reterr error) {
+	log := logf.FromContext(ctx)
 
-	// TODO(user): your logic here
+	fleetMachine := &infrav1.KairosFleetMachine{}
+	if err := r.Get(ctx, req.NamespacedName, fleetMachine); err != nil {
+		return ctrl.Result{}, client.IgnoreNotFound(err)
+	}
 
+	// Resolve the owning CAPI Machine (set via owner reference by the Machine controller).
+	machine, err := util.GetOwnerMachine(ctx, r.Client, fleetMachine.ObjectMeta)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+	if machine == nil {
+		log.Info("Waiting for Machine owner reference to be set")
+		return ctrl.Result{}, nil
+	}
+
+	cluster, err := util.GetClusterFromMetadata(ctx, r.Client, machine.ObjectMeta)
+	if err != nil {
+		log.Info("KairosFleetMachine owner Machine is missing cluster label", "err", err.Error())
+		return ctrl.Result{}, nil
+	}
+
+	patchHelper, err := patch.NewHelper(fleetMachine, r.Client)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+	defer func() {
+		if err := patchHelper.Patch(ctx, fleetMachine); err != nil && reterr == nil {
+			reterr = err
+		}
+	}()
+
+	// The InfraMachine is owned by the CAPI Machine, not the control plane.
+	if err := controllerutil.SetControllerReference(machine, fleetMachine, r.Scheme); err != nil {
+		return ctrl.Result{}, err
+	}
+
+	if annotations.IsPaused(cluster, fleetMachine) {
+		log.Info("Reconciliation is paused")
+		return ctrl.Result{}, nil
+	}
+
+	if !controllerutil.ContainsFinalizer(fleetMachine, infrav1.KairosFleetMachineFinalizer) {
+		controllerutil.AddFinalizer(fleetMachine, infrav1.KairosFleetMachineFinalizer)
+	}
+
+	if !fleetMachine.DeletionTimestamp.IsZero() {
+		return r.reconcileDelete(ctx, fleetMachine, cluster)
+	}
+	return r.reconcileNormal(ctx, fleetMachine, machine, cluster)
+}
+
+func (r *KairosFleetMachineReconciler) reconcileNormal(ctx context.Context, fleetMachine *infrav1.KairosFleetMachine, machine *clusterv1.Machine, cluster *clusterv1.Cluster) (ctrl.Result, error) {
+	log := logf.FromContext(ctx)
+
+	// 1. Wait for the bootstrap provider to publish the cloud-config data secret.
+	if machine.Spec.Bootstrap.DataSecretName == nil {
+		log.Info("Waiting for bootstrap data secret")
+		r.notReady(fleetMachine, "WaitingForBootstrapData", "Waiting for the bootstrap data secret to be available")
+		return ctrl.Result{}, nil
+	}
+
+	fc, res, err := r.fleetClientFor(ctx, cluster)
+	if err != nil || fc == nil {
+		r.notReady(fleetMachine, "WaitingForClusterInfrastructure", "Waiting for a valid AuroraBoot connection on the KairosFleetCluster")
+		return res, err
+	}
+
+	claimKey := string(fleetMachine.UID)
+
+	// 2. Claim a node from the group (idempotent on claimKey).
+	nodeID := fleetMachine.Annotations[infrav1.NodeIDAnnotation]
+	if nodeID == "" {
+		node, err := fc.Claim(ctx, fleetMachine.Spec.Group, claimKey)
+		if err != nil {
+			if fleet.IsNoCapacity(err) {
+				log.Info("No capacity in group, waiting", "group", fleetMachine.Spec.Group)
+				r.notReady(fleetMachine, "WaitingForCapacity", fmt.Sprintf("Waiting for an available node in group %q", fleetMachine.Spec.Group))
+				return ctrl.Result{RequeueAfter: waitForCapacityRequeue}, nil
+			}
+			return ctrl.Result{}, fmt.Errorf("claiming node from group %q: %w", fleetMachine.Spec.Group, err)
+		}
+		annotations.AddAnnotations(fleetMachine, map[string]string{infrav1.NodeIDAnnotation: node.ID})
+		log.Info("Claimed AuroraBoot node", "nodeID", node.ID, "group", fleetMachine.Spec.Group)
+		r.notReady(fleetMachine, "NodeClaimed", "Claimed an AuroraBoot node; applying bootstrap configuration")
+		// Requeue so the annotation is persisted before we apply the config.
+		return ctrl.Result{Requeue: true}, nil
+	}
+
+	// 3. Apply the bootstrap cloud-config (once) — passed through unmodified.
+	if fleetMachine.Annotations[cloudConfigAppliedAnnotation] != "true" {
+		data, err := r.bootstrapData(ctx, machine)
+		if err != nil {
+			return ctrl.Result{}, err
+		}
+		if _, err := fc.ApplyCloudConfig(ctx, nodeID, data); err != nil {
+			return ctrl.Result{}, fmt.Errorf("applying cloud-config to node %s: %w", nodeID, err)
+		}
+		annotations.AddAnnotations(fleetMachine, map[string]string{cloudConfigAppliedAnnotation: "true"})
+		log.Info("Applied bootstrap cloud-config", "nodeID", nodeID)
+		r.notReady(fleetMachine, "ApplyingCloudConfig", "Bootstrap cloud-config applied; waiting for the node to reboot and rejoin")
+		return ctrl.Result{RequeueAfter: waitForRejoinRequeue}, nil
+	}
+
+	// 4. Wait for the apply-cloud-config command to complete and the node to be Online.
+	node, err := fc.GetNode(ctx, nodeID)
+	if err != nil {
+		if fleet.IsNotFound(err) {
+			r.fail(fleetMachine, "NodeMissing", fmt.Sprintf("Claimed AuroraBoot node %s no longer exists", nodeID))
+			return ctrl.Result{}, nil
+		}
+		return ctrl.Result{}, fmt.Errorf("getting node %s: %w", nodeID, err)
+	}
+	applied, failed, failMsg := r.applyState(ctx, fc, nodeID)
+	if failed {
+		r.fail(fleetMachine, "CloudConfigFailed", fmt.Sprintf("apply-cloud-config failed on node %s: %s", nodeID, failMsg))
+		return ctrl.Result{}, nil
+	}
+	if !applied || node.Phase != fleet.PhaseOnline {
+		log.Info("Waiting for node to rejoin", "nodeID", nodeID, "phase", node.Phase, "applyCompleted", applied)
+		r.notReady(fleetMachine, "WaitingForNodeRejoin", "Waiting for the node to finish applying its config, reboot and report Online")
+		return ctrl.Result{RequeueAfter: waitForRejoinRequeue}, nil
+	}
+
+	// 5. Provisioned: publish providerID + addresses and mark ready.
+	providerID := providerIDPrefix + node.ID
+	fleetMachine.Spec.ProviderID = ptr.To(providerID)
+	fleetMachine.Status.Addresses = addressesFromNode(node)
+	fleetMachine.Status.Initialization.Provisioned = ptr.To(true)
+	meta.SetStatusCondition(&fleetMachine.Status.Conditions, metav1.Condition{
+		Type:               clusterv1.ReadyCondition,
+		Status:             metav1.ConditionTrue,
+		ObservedGeneration: fleetMachine.Generation,
+		Reason:             "Provisioned",
+		Message:            "Node is claimed, configured and Online",
+	})
+	log.Info("KairosFleetMachine provisioned", "nodeID", node.ID, "providerID", providerID)
 	return ctrl.Result{}, nil
+}
+
+func (r *KairosFleetMachineReconciler) reconcileDelete(ctx context.Context, fleetMachine *infrav1.KairosFleetMachine, cluster *clusterv1.Cluster) (ctrl.Result, error) {
+	log := logf.FromContext(ctx)
+
+	nodeID := fleetMachine.Annotations[infrav1.NodeIDAnnotation]
+	if nodeID != "" {
+		fc, res, err := r.fleetClientFor(ctx, cluster)
+		switch {
+		case err != nil:
+			// Cannot resolve the AuroraBoot connection (e.g. the KairosFleetCluster or
+			// its Secret is already gone). Nothing more we can do to release the node;
+			// log and let deletion proceed rather than blocking it forever.
+			log.Info("Cannot resolve AuroraBoot connection on delete; releasing finalizer without release", "err", err.Error())
+		case fc == nil:
+			return res, nil
+		default:
+			claimKey := string(fleetMachine.UID)
+			if _, err := fc.Release(ctx, nodeID, claimKey); err != nil && !fleet.IsNotFound(err) {
+				return ctrl.Result{}, fmt.Errorf("releasing node %s: %w", nodeID, err)
+			}
+			log.Info("Released AuroraBoot node", "nodeID", nodeID)
+		}
+	}
+
+	controllerutil.RemoveFinalizer(fleetMachine, infrav1.KairosFleetMachineFinalizer)
+	return ctrl.Result{}, nil
+}
+
+// applyState reports whether the apply-cloud-config command completed and, if it
+// failed, the failure message.
+func (r *KairosFleetMachineReconciler) applyState(ctx context.Context, fc fleet.Client, nodeID string) (completed, failed bool, failMsg string) {
+	cmds, err := fc.GetCommands(ctx, nodeID)
+	if err != nil {
+		// Treat a transient list error as "not yet completed"; the caller requeues.
+		return false, false, ""
+	}
+	for i := range cmds {
+		if cmds[i].Command != fleet.CommandApplyCloudConfig {
+			continue
+		}
+		switch cmds[i].Phase {
+		case fleet.CommandPhaseCompleted:
+			return true, false, ""
+		case fleet.CommandPhaseFailed, fleet.CommandPhaseExpired:
+			return false, true, cmds[i].Result
+		}
+	}
+	return false, false, ""
+}
+
+// fleetClientFor resolves a fleet.Client from the cluster's KairosFleetCluster. It
+// returns (nil, requeue-result, nil) when the InfraCluster is not yet available.
+func (r *KairosFleetMachineReconciler) fleetClientFor(ctx context.Context, cluster *clusterv1.Cluster) (fleet.Client, ctrl.Result, error) {
+	fleetCluster := &infrav1.KairosFleetCluster{}
+	key := types.NamespacedName{Namespace: cluster.Namespace, Name: cluster.Spec.InfrastructureRef.Name}
+	if err := r.Get(ctx, key, fleetCluster); err != nil {
+		return nil, ctrl.Result{RequeueAfter: waitForRejoinRequeue}, client.IgnoreNotFound(err)
+	}
+	fc, err := resolveFleetClient(ctx, r.Client, r.fleetFactory(), fleetCluster)
+	if err != nil {
+		return nil, ctrl.Result{RequeueAfter: waitForCapacityRequeue}, nil
+	}
+	return fc, ctrl.Result{}, nil
+}
+
+func (r *KairosFleetMachineReconciler) bootstrapData(ctx context.Context, machine *clusterv1.Machine) (string, error) {
+	secret := &corev1.Secret{}
+	key := types.NamespacedName{Namespace: machine.Namespace, Name: *machine.Spec.Bootstrap.DataSecretName}
+	if err := r.Get(ctx, key, secret); err != nil {
+		return "", fmt.Errorf("getting bootstrap data secret %s: %w", key, err)
+	}
+	data, ok := secret.Data[bootstrapDataSecretKey]
+	if !ok {
+		return "", fmt.Errorf("bootstrap data secret %s has no %q key", key, bootstrapDataSecretKey)
+	}
+	return string(data), nil
+}
+
+func (r *KairosFleetMachineReconciler) notReady(fleetMachine *infrav1.KairosFleetMachine, reason, message string) {
+	fleetMachine.Status.Initialization.Provisioned = ptr.To(false)
+	meta.SetStatusCondition(&fleetMachine.Status.Conditions, metav1.Condition{
+		Type:               clusterv1.ReadyCondition,
+		Status:             metav1.ConditionFalse,
+		ObservedGeneration: fleetMachine.Generation,
+		Reason:             reason,
+		Message:            message,
+	})
+}
+
+func (r *KairosFleetMachineReconciler) fail(fleetMachine *infrav1.KairosFleetMachine, reason, message string) {
+	fleetMachine.Status.FailureReason = ptr.To(reason)
+	fleetMachine.Status.FailureMessage = ptr.To(message)
+	r.notReady(fleetMachine, reason, message)
+}
+
+func (r *KairosFleetMachineReconciler) fleetFactory() FleetClientFactory {
+	if r.FleetClientFactory != nil {
+		return r.FleetClientFactory
+	}
+	return DefaultFleetClientFactory
+}
+
+// addressesFromNode derives machine addresses from the node's reported identity.
+// AuroraBoot does not expose structured addresses; the hostname is surfaced as a
+// Hostname address (see ADR 0001 §6).
+func addressesFromNode(node *fleet.Node) []clusterv1.MachineAddress {
+	if node.Hostname == "" {
+		return nil
+	}
+	return []clusterv1.MachineAddress{
+		{Type: clusterv1.MachineHostName, Address: node.Hostname},
+	}
 }
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *KairosFleetMachineReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
-		For(&infrastructurev1alpha1.KairosFleetMachine{}).
-		Named("kairosfleetmachine").
+		For(&infrav1.KairosFleetMachine{}).
+		Watches(
+			&clusterv1.Machine{},
+			handler.EnqueueRequestsFromMapFunc(
+				util.MachineToInfrastructureMapFunc(infrav1.GroupVersion.WithKind("KairosFleetMachine")),
+			),
+		).
 		Complete(r)
 }
