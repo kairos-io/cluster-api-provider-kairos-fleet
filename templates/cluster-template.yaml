@@ -1,0 +1,125 @@
+# Cluster API cluster template for a Kairos fleet cluster.
+#
+# Render with:
+#   clusterctl generate cluster <name> \
+#     --infrastructure kairos-fleet \
+#     --kubernetes-version v1.34.0 \
+#     --control-plane-machine-count 1 --worker-machine-count 1 > cluster.yaml
+#
+# A fleet cluster composes three providers: this infrastructure provider
+# (KairosFleet*), the Kairos bootstrap provider (KairosConfigTemplate), and the
+# Kairos control-plane provider (KairosControlPlane) — install all three with
+# `clusterctl init`. Nodes are claimed from AuroraBoot groups; create the admin-token
+# Secret (AURORABOOT_TOKEN_SECRET, key `token`) in the cluster's namespace first.
+#
+# Distribution is k3s: the fleet providerID self-discovery is implemented for k3s.
+---
+apiVersion: cluster.x-k8s.io/v1beta2
+kind: Cluster
+metadata:
+  name: ${CLUSTER_NAME}
+spec:
+  clusterNetwork:
+    pods:
+      cidrBlocks:
+        - ${POD_CIDR:=192.168.0.0/16}
+    services:
+      cidrBlocks:
+        - ${SERVICE_CIDR:=10.128.0.0/12}
+  controlPlaneRef:
+    apiGroup: controlplane.cluster.x-k8s.io
+    kind: KairosControlPlane
+    name: ${CLUSTER_NAME}-control-plane
+  infrastructureRef:
+    apiGroup: infrastructure.cluster.x-k8s.io
+    kind: KairosFleetCluster
+    name: ${CLUSTER_NAME}
+---
+apiVersion: infrastructure.cluster.x-k8s.io/v1alpha1
+kind: KairosFleetCluster
+metadata:
+  name: ${CLUSTER_NAME}
+spec:
+  # Operator-supplied endpoint (e.g. a kube-vip VIP or a managed load balancer).
+  controlPlaneEndpoint:
+    host: ${CONTROL_PLANE_ENDPOINT_HOST}
+    port: ${CONTROL_PLANE_ENDPOINT_PORT:=6443}
+  auroraboot:
+    url: ${AURORABOOT_URL}
+    adminTokenSecretRef:
+      name: ${AURORABOOT_TOKEN_SECRET:=auroraboot-admin-token}
+---
+apiVersion: controlplane.cluster.x-k8s.io/v1beta2
+kind: KairosControlPlane
+metadata:
+  name: ${CLUSTER_NAME}-control-plane
+spec:
+  replicas: ${CONTROL_PLANE_MACHINE_COUNT:=1}
+  version: ${KUBERNETES_VERSION}
+  distribution: k3s
+  machineTemplate:
+    infrastructureRef:
+      apiVersion: infrastructure.cluster.x-k8s.io/v1alpha1
+      kind: KairosFleetMachineTemplate
+      name: ${CLUSTER_NAME}-control-plane
+  kairosConfigTemplate:
+    name: ${CLUSTER_NAME}-control-plane
+---
+apiVersion: infrastructure.cluster.x-k8s.io/v1alpha1
+kind: KairosFleetMachineTemplate
+metadata:
+  name: ${CLUSTER_NAME}-control-plane
+spec:
+  template:
+    spec:
+      group: ${FLEET_CONTROL_PLANE_GROUP:=control-plane}
+---
+apiVersion: bootstrap.cluster.x-k8s.io/v1beta2
+kind: KairosConfigTemplate
+metadata:
+  name: ${CLUSTER_NAME}-control-plane
+spec:
+  template:
+    spec:
+      distribution: k3s
+---
+apiVersion: cluster.x-k8s.io/v1beta2
+kind: MachineDeployment
+metadata:
+  name: ${CLUSTER_NAME}-md-0
+spec:
+  clusterName: ${CLUSTER_NAME}
+  replicas: ${WORKER_MACHINE_COUNT:=1}
+  selector:
+    matchLabels: {}
+  template:
+    spec:
+      clusterName: ${CLUSTER_NAME}
+      version: ${KUBERNETES_VERSION}
+      bootstrap:
+        configRef:
+          apiGroup: bootstrap.cluster.x-k8s.io
+          kind: KairosConfigTemplate
+          name: ${CLUSTER_NAME}-md-0
+      infrastructureRef:
+        apiGroup: infrastructure.cluster.x-k8s.io
+        kind: KairosFleetMachineTemplate
+        name: ${CLUSTER_NAME}-md-0
+---
+apiVersion: infrastructure.cluster.x-k8s.io/v1alpha1
+kind: KairosFleetMachineTemplate
+metadata:
+  name: ${CLUSTER_NAME}-md-0
+spec:
+  template:
+    spec:
+      group: ${FLEET_WORKER_GROUP:=workers}
+---
+apiVersion: bootstrap.cluster.x-k8s.io/v1beta2
+kind: KairosConfigTemplate
+metadata:
+  name: ${CLUSTER_NAME}-md-0
+spec:
+  template:
+    spec:
+      distribution: k3s

@@ -1,5 +1,5 @@
 # Image URL to use all building/pushing image targets
-IMG ?= controller:latest
+IMG ?= ghcr.io/kairos-io/cluster-api-provider-kairos-fleet:dev
 
 # Get the currently used golang install path (in GOPATH/bin, unless GOBIN is set)
 ifeq (,$(shell go env GOBIN))
@@ -132,6 +132,16 @@ build-installer: manifests generate kustomize ## Generate a consolidated YAML wi
 	mkdir -p dist
 	cd config/manager && $(KUSTOMIZE) edit set image controller=${IMG}
 	$(KUSTOMIZE) build config/default > dist/install.yaml
+
+RELEASE_DIR ?= out
+
+.PHONY: release-manifests
+release-manifests: manifests generate kustomize ## Generate the clusterctl release assets (components, metadata, templates) into $(RELEASE_DIR).
+	mkdir -p $(RELEASE_DIR)
+	cd config/manager && $(KUSTOMIZE) edit set image controller=${IMG}
+	$(KUSTOMIZE) build config/default > $(RELEASE_DIR)/infrastructure-components.yaml
+	cp metadata.yaml $(RELEASE_DIR)/metadata.yaml
+	cp templates/cluster-template*.yaml $(RELEASE_DIR)/
 
 ##@ Deployment
 

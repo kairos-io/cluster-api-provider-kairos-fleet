@@ -8,11 +8,14 @@ namespace: cluster-api-provider-kairos-fleet-system
 # field above.
 namePrefix: cluster-api-provider-kairos-fleet-
 
-# Labels to add to all resources and selectors.
-#labels:
-#- includeSelectors: true
-#  pairs:
-#    someName: someValue
+# The clusterctl provider label. clusterctl uses it to track and `clusterctl move`
+# every resource this provider owns. It must be on all components (not selectors, so
+# it does not alter Deployment/Service selectors). The value is the clusterctl provider
+# name: infrastructure-<name>.
+labels:
+- includeSelectors: false
+  pairs:
+    cluster.x-k8s.io/provider: infrastructure-kairos-fleet
 
 resources:
 - ../crd
