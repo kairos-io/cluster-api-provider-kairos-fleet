@@ -55,7 +55,7 @@ type KairosFleetClusterSpec struct {
 	// controlPlaneEndpoint represents the endpoint used to communicate with the control
 	// plane. For a fleet cluster the endpoint is operator-supplied (for example a kube-vip
 	// VIP or a managed load balancer); this provider does not allocate it. It may be set at
-	// creation or filled in later — status.initialization.provisioned gates on it being set.
+	// creation or filled in later. status.initialization.provisioned gates on it being set.
 	// +optional
 	ControlPlaneEndpoint *clusterv1.APIEndpoint `json:"controlPlaneEndpoint,omitempty"`
 

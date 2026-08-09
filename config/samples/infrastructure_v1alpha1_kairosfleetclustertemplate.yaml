@@ -1,3 +1,14 @@
+# Sample KairosFleetClusterTemplate: wraps KairosFleetClusterSpec for
+# ClusterClass use, stamping out KairosFleetCluster resources.
+#
+# Apply with:
+#   kubectl apply -f config/samples/infrastructure_v1alpha1_kairosfleetclustertemplate.yaml
+#
+# Prerequisites:
+#   - Only needed if you use ClusterClass; the single-cluster quickstart
+#     (docs/QUICKSTART.md) uses a plain KairosFleetCluster instead.
+#   - Same AuroraBoot admin-token Secret prerequisite as
+#     infrastructure_v1alpha1_kairosfleetcluster.yaml.
 apiVersion: infrastructure.cluster.x-k8s.io/v1alpha1
 kind: KairosFleetClusterTemplate
 metadata:
@@ -6,4 +17,16 @@ metadata:
     app.kubernetes.io/managed-by: kustomize
   name: kairosfleetclustertemplate-sample
 spec:
-  # TODO(user): Add fields here
+  template:
+    spec:
+      # Operator-supplied control-plane endpoint (a kube-vip VIP or a
+      # managed load balancer). Stamped onto every KairosFleetCluster created
+      # from this template; override per-cluster with a patch if endpoints
+      # differ.
+      controlPlaneEndpoint:
+        host: 203.0.113.10
+        port: 6443
+      auroraboot:
+        url: https://auroraboot.example.com:8080
+        adminTokenSecretRef:
+          name: auroraboot-admin-token

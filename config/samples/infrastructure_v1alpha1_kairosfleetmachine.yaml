@@ -1,3 +1,21 @@
+# Sample KairosFleetMachine: the infrastructure side of a Cluster API
+# Machine, backed by an AuroraBoot node claimed from a group.
+#
+# Apply with:
+#   kubectl apply -f config/samples/infrastructure_v1alpha1_kairosfleetmachine.yaml
+#
+# Prerequisites:
+#   - A KairosFleetCluster (and its owning CAPI Cluster) already exists in
+#     this namespace; the KairosFleetMachine controller resolves the
+#     AuroraBoot connection from Cluster.spec.infrastructureRef.
+#   - The target group ("workers" below) exists in AuroraBoot and has at
+#     least one enrolled, unclaimed node.
+#   - This resource is normally created by a CAPI Machine (or a
+#     MachineDeployment via KairosFleetMachineTemplate, see
+#     infrastructure_v1alpha1_kairosfleetmachinetemplate.yaml), which owns it
+#     through an owner reference set by the Machine controller. A standalone
+#     KairosFleetMachine with no owning Machine, as applied below, will wait
+#     indefinitely at "Waiting for Machine owner reference to be set".
 apiVersion: infrastructure.cluster.x-k8s.io/v1alpha1
 kind: KairosFleetMachine
 metadata:
@@ -6,4 +24,9 @@ metadata:
     app.kubernetes.io/managed-by: kustomize
   name: kairosfleetmachine-sample
 spec:
-  # TODO(user): Add fields here
+  # AuroraBoot group to claim a node from. Must already exist and hold
+  # unclaimed, enrolled nodes; an empty group is a transient "waiting for
+  # capacity" state, not a failure.
+  group: workers
+  # providerID is intentionally not set here: the controller sets it once a
+  # node is claimed and confirmed rejoined, and it is immutable once set.
