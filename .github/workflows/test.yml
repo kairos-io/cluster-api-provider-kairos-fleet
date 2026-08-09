@@ -50,3 +50,24 @@ jobs:
         run: |
           go install golang.org/x/vuln/cmd/govulncheck@v1.6.0
           govulncheck ./...
+
+  trivy:
+    name: trivy image scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Clone the code
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Build the manager image
+        run: docker build -t capi-kairos-fleet:scan .
+
+      - name: Scan the image (fail on fixable CRITICAL/HIGH)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: capi-kairos-fleet:scan
+          format: table
+          severity: CRITICAL,HIGH
+          # Only gate on vulnerabilities that have a fix available; unfixed ones
+          # can't be actioned here and would just wedge CI.
+          ignore-unfixed: true
+          exit-code: "1"
