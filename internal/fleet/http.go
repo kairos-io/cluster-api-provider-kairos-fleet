@@ -162,6 +162,25 @@ func (c *httpClient) GetCommands(ctx context.Context, nodeID string) ([]Command,
 	return cmds, nil
 }
 
+func (c *httpClient) ResolveGroupID(ctx context.Context, ref string) (string, error) {
+	var out []groupDTO
+	if err := c.do(ctx, http.MethodGet, "/api/v1/groups", nil, &out); err != nil {
+		return "", err
+	}
+	// Prefer an exact ID match (ref is already a UUID), then fall back to name.
+	for i := range out {
+		if out[i].ID == ref {
+			return out[i].ID, nil
+		}
+	}
+	for i := range out {
+		if out[i].Name == ref {
+			return out[i].ID, nil
+		}
+	}
+	return "", &APIError{StatusCode: http.StatusNotFound, ErrorMsg: fmt.Sprintf("group %q not found", ref)}
+}
+
 func (c *httpClient) Release(ctx context.Context, nodeID, claimKey string) (bool, error) {
 	body := map[string]string{"claimKey": claimKey}
 	var out struct {
@@ -266,4 +285,10 @@ func (d *commandDTO) toCommand() *Command {
 type createCommandDTO struct {
 	Command string            `json:"command"`
 	Args    map[string]string `json:"args,omitempty"`
+}
+
+// groupDTO mirrors the AuroraBoot /api/v1/groups JSON shape.
+type groupDTO struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
 }

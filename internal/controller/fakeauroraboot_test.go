@@ -92,6 +92,7 @@ func (f *fakeAuroraBoot) URL() string { return f.srv.URL }
 func (f *fakeAuroraBoot) Close()      { f.srv.Close() }
 
 func (f *fakeAuroraBoot) route(w http.ResponseWriter, r *http.Request) {
+	// /api/v1/groups
 	// /api/v1/groups/{id}/claim
 	// /api/v1/nodes/{id}
 	// /api/v1/nodes/{id}/commands
@@ -102,6 +103,8 @@ func (f *fakeAuroraBoot) route(w http.ResponseWriter, r *http.Request) {
 	defer f.mu.Unlock()
 
 	switch {
+	case len(parts) == 1 && parts[0] == "groups" && r.Method == http.MethodGet:
+		f.handleListGroups(w)
 	case len(parts) == 3 && parts[0] == "groups" && parts[2] == "claim" && r.Method == http.MethodPost:
 		f.handleClaim(w, r, parts[1])
 	case len(parts) == 2 && parts[0] == "nodes" && r.Method == http.MethodGet:
@@ -115,6 +118,18 @@ func (f *fakeAuroraBoot) route(w http.ResponseWriter, r *http.Request) {
 	default:
 		http.Error(w, `{"error":"not found"}`, http.StatusNotFound)
 	}
+}
+
+// handleListGroups returns every seeded group, with ID == Name == the pool key it was
+// seeded under. This matches how the e2e test seeds pools (keyed by the group name it
+// also assigns to KairosFleetMachine.spec.group), so name resolution is a no-op here
+// while still exercising the real GET /api/v1/groups round trip.
+func (f *fakeAuroraBoot) handleListGroups(w http.ResponseWriter) {
+	out := make([]map[string]string, 0, len(f.groupPool))
+	for group := range f.groupPool {
+		out = append(out, map[string]string{"id": group, "name": group})
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 func (f *fakeAuroraBoot) handleClaim(w http.ResponseWriter, r *http.Request, group string) {

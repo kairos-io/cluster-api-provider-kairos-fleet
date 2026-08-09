@@ -63,18 +63,18 @@ name instead, and consult that repository's own installation docs for its
 ## 3. Verify the deployment
 
 ```bash
-kubectl get pods -n cluster-api-provider-kairos-fleet-system
+kubectl get pods -n capi-kairos-fleet-system
 kubectl get crds | grep kairosfleet
 ```
 
-Expect a `cluster-api-provider-kairos-fleet-controller-manager` Deployment
+Expect a `capi-kairos-fleet-controller-manager` Deployment
 with one available replica, and four CRDs: `kairosfleetclusters`,
 `kairosfleetclustertemplates`, `kairosfleetmachines`, and
 `kairosfleetmachinetemplates`.
 
 ```bash
-kubectl get deployment -n cluster-api-provider-kairos-fleet-system \
-  cluster-api-provider-kairos-fleet-controller-manager
+kubectl get deployment -n capi-kairos-fleet-system \
+  capi-kairos-fleet-controller-manager
 ```
 
 ## Uninstall

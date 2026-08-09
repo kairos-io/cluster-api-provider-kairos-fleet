@@ -140,7 +140,19 @@ func (r *KairosFleetMachineReconciler) reconcileNormal(ctx context.Context, flee
 	// 2. Claim a node from the group (idempotent on claimKey).
 	nodeID := fleetMachine.Annotations[infrav1.NodeIDAnnotation]
 	if nodeID == "" {
-		node, err := fc.Claim(ctx, fleetMachine.Spec.Group, claimKey)
+		// AuroraBoot's claim endpoint keys on the group's ID, but spec.group is the
+		// human-friendly group name; resolve it first.
+		groupID, err := fc.ResolveGroupID(ctx, fleetMachine.Spec.Group)
+		if err != nil {
+			if fleet.IsNotFound(err) {
+				log.Info("AuroraBoot group not found, waiting", "group", fleetMachine.Spec.Group)
+				r.notReady(fleetMachine, "GroupNotFound", fmt.Sprintf("spec.group %q does not match any AuroraBoot group", fleetMachine.Spec.Group))
+				return ctrl.Result{RequeueAfter: waitForCapacityRequeue}, nil
+			}
+			return ctrl.Result{}, fmt.Errorf("resolving group %q: %w", fleetMachine.Spec.Group, err)
+		}
+
+		node, err := fc.Claim(ctx, groupID, claimKey)
 		if err != nil {
 			if fleet.IsNoCapacity(err) {
 				log.Info("No capacity in group, waiting", "group", fleetMachine.Spec.Group)

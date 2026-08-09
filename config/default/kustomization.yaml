@@ -1,12 +1,17 @@
 # Adds namespace to all resources.
-namespace: cluster-api-provider-kairos-fleet-system
+#
+# Kept short and aligned with the sibling Kairos providers (capi-kairos-bootstrap-,
+# capi-kairos-control-plane-): the previous "cluster-api-provider-kairos-fleet-"
+# prefix pushed the generated metrics Service name to 68 characters, over the 63-char
+# limit for a Service name, so clusterctl init failed to apply it.
+namespace: capi-kairos-fleet-system
 
 # Value of this field is prepended to the
 # names of all resources, e.g. a deployment named
 # "wordpress" becomes "alices-wordpress".
 # Note that it should also match with the prefix (text before '-') of the namespace
 # field above.
-namePrefix: cluster-api-provider-kairos-fleet-
+namePrefix: capi-kairos-fleet-
 
 # The clusterctl provider label. clusterctl uses it to track and `clusterctl move`
 # every resource this provider owns. It must be on all components (not selectors, so

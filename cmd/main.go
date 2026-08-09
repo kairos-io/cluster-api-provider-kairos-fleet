@@ -29,6 +29,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta2"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/certwatcher"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
@@ -53,6 +54,14 @@ var (
 
 func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
+
+	// Register the Cluster API core v1beta2 types. Both controllers Watch
+	// clusterv1.Cluster and resolve the owning clusterv1.Machine, so without
+	// this the manager crash-loops against a real cluster with "no kind is
+	// registered for the type v1beta2.Machine in scheme". Envtest suites
+	// build their own scheme and register these types independently, which
+	// is why this gap didn't surface until a real integrated e2e run.
+	utilruntime.Must(clusterv1.AddToScheme(scheme))
 
 	utilruntime.Must(infrastructurev1alpha1.AddToScheme(scheme))
 	// +kubebuilder:scaffold:scheme

@@ -78,6 +78,13 @@ type Command struct {
 	Result  string
 }
 
+// Group is the subset of an AuroraBoot group the provider needs to resolve a
+// human-friendly name (as used in KairosFleetMachine.spec.group) to the group's ID.
+type Group struct {
+	ID   string
+	Name string
+}
+
 // Client is the fleet API surface the controllers depend on. It is intentionally
 // small so it can be faked in tests (see FakeClient).
 type Client interface {
@@ -108,4 +115,10 @@ type Client interface {
 	// returning it to the group's pool. released reports whether a claim was actually
 	// cleared. A claim held by a different key yields an error satisfying IsConflict.
 	Release(ctx context.Context, nodeID, claimKey string) (released bool, err error)
+
+	// ResolveGroupID resolves an AuroraBoot group reference — a human name (as used in
+	// KairosFleetMachine.spec.group) or an already-resolved UUID — to the group's ID.
+	// AuroraBoot's claim endpoint keys on the ID; spec.group is a name. A reference that
+	// matches no group yields an error satisfying IsNotFound.
+	ResolveGroupID(ctx context.Context, ref string) (groupID string, err error)
 }
