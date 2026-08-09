@@ -1,3 +1,13 @@
+# Sample KairosFleetMachineTemplate: wraps KairosFleetMachineSpec for
+# MachineDeployment/MachineSet (and ClusterClass) use, stamping out
+# KairosFleetMachine resources per replica.
+#
+# Apply with:
+#   kubectl apply -f config/samples/infrastructure_v1alpha1_kairosfleetmachinetemplate.yaml
+#
+# Prerequisites: same AuroraBoot group prerequisite as
+# infrastructure_v1alpha1_kairosfleetmachine.yaml. A MachineDeployment of N
+# replicas referencing this template claims N nodes from the group below.
 apiVersion: infrastructure.cluster.x-k8s.io/v1alpha1
 kind: KairosFleetMachineTemplate
 metadata:
@@ -6,4 +16,6 @@ metadata:
     app.kubernetes.io/managed-by: kustomize
   name: kairosfleetmachinetemplate-sample
 spec:
-  # TODO(user): Add fields here
+  template:
+    spec:
+      group: workers

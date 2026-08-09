@@ -1,3 +1,24 @@
+# Sample KairosFleetCluster: the infrastructure side of a Cluster API Cluster
+# backed by an AuroraBoot fleet.
+#
+# Apply with:
+#   kubectl apply -f config/samples/infrastructure_v1alpha1_kairosfleetcluster.yaml
+#
+# Prerequisites:
+#   - The KairosFleetCluster CRD and controller must be installed and running
+#     (see docs/INSTALL.md).
+#   - An AuroraBoot instance reachable at spec.auroraboot.url.
+#   - A Secret in this namespace holding the AuroraBoot admin bearer token
+#     under the "token" data key, referenced by
+#     spec.auroraboot.adminTokenSecretRef.name. Create it out of band, for
+#     example:
+#       kubectl create secret generic auroraboot-admin-token \
+#         --from-literal=token="$AURORABOOT_ADMIN_TOKEN"
+#     Do not commit the token value to a manifest.
+#   - This resource is normally created by clusterctl generate cluster (see
+#     docs/QUICKSTART.md), owned by a CAPI Cluster. Applying it standalone,
+#     as below, is useful to test the AuroraBoot connection in isolation; it
+#     will not be adopted by a Cluster unless one references it by name.
 apiVersion: infrastructure.cluster.x-k8s.io/v1alpha1
 kind: KairosFleetCluster
 metadata:
@@ -6,4 +27,13 @@ metadata:
     app.kubernetes.io/managed-by: kustomize
   name: kairosfleetcluster-sample
 spec:
-  # TODO(user): Add fields here
+  # Operator-supplied control-plane endpoint (a kube-vip VIP or a managed
+  # load balancer). This provider does not allocate it;
+  # status.initialization.provisioned stays false until it is set.
+  controlPlaneEndpoint:
+    host: 203.0.113.10
+    port: 6443
+  auroraboot:
+    url: https://auroraboot.example.com:8080
+    adminTokenSecretRef:
+      name: auroraboot-admin-token

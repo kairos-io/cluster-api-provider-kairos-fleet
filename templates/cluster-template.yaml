@@ -8,11 +8,12 @@
 #
 # A fleet cluster composes three providers: this infrastructure provider
 # (KairosFleet*), the Kairos bootstrap provider (KairosConfigTemplate), and the
-# Kairos control-plane provider (KairosControlPlane) — install all three with
+# Kairos control-plane provider (KairosControlPlane). Install all three with
 # `clusterctl init`. Nodes are claimed from AuroraBoot groups; create the admin-token
 # Secret (AURORABOOT_TOKEN_SECRET, key `token`) in the cluster's namespace first.
 #
-# Distribution is k3s: the fleet providerID self-discovery is implemented for k3s.
+# This example uses k3s. k0s is also supported: set distribution to k0s on both
+# the KairosControlPlane and the KairosConfigTemplate. k3s is the reference path.
 ---
 apiVersion: cluster.x-k8s.io/v1beta2
 kind: Cluster
