@@ -33,6 +33,7 @@ type FakeClient struct {
 	RebootFunc           func(ctx context.Context, nodeID string) (*Command, error)
 	GetCommandsFunc      func(ctx context.Context, nodeID string) ([]Command, error)
 	ReleaseFunc          func(ctx context.Context, nodeID, claimKey string) (bool, error)
+	ResolveGroupIDFunc   func(ctx context.Context, ref string) (string, error)
 
 	Claims   []ClaimCall
 	Applies  []ApplyCall
@@ -113,4 +114,13 @@ func (f *FakeClient) Release(ctx context.Context, nodeID, claimKey string) (bool
 		return f.ReleaseFunc(ctx, nodeID, claimKey)
 	}
 	return true, nil
+}
+
+func (f *FakeClient) ResolveGroupID(ctx context.Context, ref string) (string, error) {
+	if f.ResolveGroupIDFunc != nil {
+		return f.ResolveGroupIDFunc(ctx, ref)
+	}
+	// Default: identity, so existing fake-based tests that pass group ids directly
+	// keep passing unchanged.
+	return ref, nil
 }

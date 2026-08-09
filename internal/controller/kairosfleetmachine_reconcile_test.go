@@ -243,6 +243,61 @@ func TestMachineReconcile_WaitsForApplyBeforeReboot(t *testing.T) {
 	}
 }
 
+func TestMachineReconcile_ResolvesGroupNameBeforeClaim(t *testing.T) {
+	// testFixture sets spec.group to the human-friendly name "workers"; the fake
+	// AuroraBoot group resolves that name to a distinct UUID, and the reconciler must
+	// claim using the resolved id, not the raw spec.group value.
+	const resolvedGroupID = "grp-uuid-workers"
+	fc := &fleet.FakeClient{
+		ResolveGroupIDFunc: func(_ context.Context, ref string) (string, error) {
+			if ref != "workers" {
+				t.Fatalf("ResolveGroupID called with %q, want %q", ref, "workers")
+			}
+			return resolvedGroupID, nil
+		},
+		ClaimFunc: func(_ context.Context, _, _ string) (*fleet.Node, error) {
+			return &fleet.Node{ID: testNodeID, Hostname: testHostname, Phase: fleet.PhaseOnline}, nil
+		},
+	}
+	r, c := newReconciler(t, fc, testFixture(true))
+
+	reconcileKFM(t, r)
+
+	if len(fc.Claims) != 1 {
+		t.Fatalf("expected one claim, got %+v", fc.Claims)
+	}
+	if fc.Claims[0].GroupID != resolvedGroupID {
+		t.Fatalf("Claim group = %q, want the resolved group id %q", fc.Claims[0].GroupID, resolvedGroupID)
+	}
+	if got := getKFM(t, c).Annotations[infrav1.NodeIDAnnotation]; got != testNodeID {
+		t.Fatalf("node-id annotation = %q, want %q", got, testNodeID)
+	}
+}
+
+func TestMachineReconcile_GroupNotFoundRequeues(t *testing.T) {
+	fc := &fleet.FakeClient{
+		ResolveGroupIDFunc: func(_ context.Context, _ string) (string, error) {
+			return "", fleet.NotFoundError()
+		},
+	}
+	r, c := newReconciler(t, fc, testFixture(true))
+
+	res := reconcileKFM(t, r)
+	if res.RequeueAfter == 0 {
+		t.Fatalf("expected a timed requeue when the group is not found")
+	}
+	if len(fc.Claims) != 0 {
+		t.Fatalf("did not expect a claim attempt when group resolution fails, got %+v", fc.Claims)
+	}
+	kfm := getKFM(t, c)
+	if kfm.Annotations[infrav1.NodeIDAnnotation] != "" {
+		t.Fatalf("did not expect a node-id annotation when the group is not found")
+	}
+	if provisioned := ptr.Deref(kfm.Status.Initialization.Provisioned, true); provisioned {
+		t.Fatalf("expected not provisioned when the group is not found")
+	}
+}
+
 func TestMachineReconcile_NoCapacityRequeues(t *testing.T) {
 	fc := &fleet.FakeClient{
 		ClaimFunc: func(_ context.Context, _, _ string) (*fleet.Node, error) {

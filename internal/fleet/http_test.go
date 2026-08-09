@@ -133,3 +133,51 @@ func TestGetNode_NotFoundClassified(t *testing.T) {
 		t.Errorf("IsNotFound(%v) = false, want true", err)
 	}
 }
+
+func TestResolveGroupID(t *testing.T) {
+	const groupsBody = `[{"id":"grp-uuid-1","name":"control-plane"},{"id":"grp-uuid-2","name":"workers"}]`
+
+	tests := []struct {
+		name       string
+		ref        string
+		wantID     string
+		wantErr    bool
+		wantNotFnd bool
+	}{
+		{name: "resolves by name", ref: "workers", wantID: "grp-uuid-2"},
+		{name: "resolves by id", ref: "grp-uuid-1", wantID: "grp-uuid-1"},
+		{name: "no match is not found", ref: "does-not-exist", wantErr: true, wantNotFnd: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var gotPath string
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				gotPath = r.URL.Path
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(groupsBody))
+			}))
+			defer srv.Close()
+
+			id, err := New(srv.URL, "tok").ResolveGroupID(context.Background(), tt.ref)
+			if gotPath != "/api/v1/groups" {
+				t.Errorf("path = %q, want /api/v1/groups", gotPath)
+			}
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("expected error, got nil")
+				}
+				if IsNotFound(err) != tt.wantNotFnd {
+					t.Errorf("IsNotFound(%v) = %v, want %v", err, IsNotFound(err), tt.wantNotFnd)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("ResolveGroupID: %v", err)
+			}
+			if id != tt.wantID {
+				t.Errorf("id = %q, want %q", id, tt.wantID)
+			}
+		})
+	}
+}
