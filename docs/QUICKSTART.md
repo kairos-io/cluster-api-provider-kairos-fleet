@@ -1,7 +1,8 @@
 # Quickstart
 
-> Last verified against: cluster-api-provider-kairos-fleet commit `23b1416`,
-> Cluster API v1.13.4 (v1beta2 contract), Kairos v4.1.2, k3s.
+> Last verified against: cluster-api-provider-kairos-fleet v0.1.0,
+> Cluster API v1.13.4 (v1beta2 contract), Kairos v4.1.2, k3s (k0s also
+> supported).
 
 This walks through provisioning a Kairos fleet-backed workload cluster end to
 end: a single control-plane machine and one worker, claimed from an
@@ -26,9 +27,12 @@ AuroraBoot fleet.
   will be reachable on. This provider does not allocate one: use a kube-vip
   VIP, a load balancer, or a DNS name you manage, pointed at the
   control-plane node once it is up.
-- k3s is the only distribution with fleet providerID self-discovery
-  implemented (see [ARCHITECTURE.md](ARCHITECTURE.md#providerid)); use
-  `distribution: k3s`, as the default template already does.
+- Both k3s and k0s have fleet providerID self-discovery implemented (see
+  [ARCHITECTURE.md](ARCHITECTURE.md#providerid)). This quickstart uses
+  `distribution: k3s`, the reference and most-exercised path, matching the
+  default template. To use k0s instead, set `distribution: k0s` on both the
+  `KairosControlPlane` and the `KairosConfigTemplate` (see
+  `templates/cluster-template.yaml`).
 
 ## 1. Create the AuroraBoot admin-token Secret
 
@@ -61,8 +65,8 @@ environment.
 | `AURORABOOT_TOKEN_SECRET` | `auroraboot-admin-token` | Name of the Secret created in step 1. |
 | `CONTROL_PLANE_ENDPOINT_HOST` | (required) | Host of the workload cluster's API endpoint. |
 | `CONTROL_PLANE_ENDPOINT_PORT` | `6443` | Port of the workload cluster's API endpoint. |
-| `FLEET_CONTROL_PLANE_GROUP` | `control-plane` | AuroraBoot group the control-plane machine is claimed from. |
-| `FLEET_WORKER_GROUP` | `workers` | AuroraBoot group worker machines are claimed from. |
+| `FLEET_CONTROL_PLANE_GROUP` | `control-plane` | Name (or ID) of the AuroraBoot group the control-plane machine is claimed from; resolved to the group's ID before claiming. |
+| `FLEET_WORKER_GROUP` | `workers` | Name (or ID) of the AuroraBoot group worker machines are claimed from; resolved to the group's ID before claiming. |
 | `POD_CIDR` | `192.168.0.0/16` | Cluster pod network. |
 | `SERVICE_CIDR` | `10.128.0.0/12` | Cluster service network. |
 
@@ -103,6 +107,7 @@ kubectl get kairosfleetmachines -n demo -w
 | --- | --- |
 | `WaitingForBootstrapData` | Waiting for the Kairos bootstrap provider to publish the cloud-config Secret. |
 | `WaitingForClusterInfrastructure` | Waiting for the KairosFleetCluster's AuroraBoot connection to become valid. |
+| `GroupNotFound` | `spec.group` does not match any AuroraBoot group by name or ID. Not terminal: create the group or fix the name and the machine picks it up on the next reconcile. |
 | `WaitingForCapacity` | The target group has no unclaimed nodes. Enroll more nodes in AuroraBoot or free one up. |
 | `NodeClaimed` | A node has been claimed; applying its bootstrap cloud-config next. |
 | `ApplyingCloudConfig` | The cloud-config has been handed to AuroraBoot and is being written to the node, or the controller is waiting for that write to complete. |
@@ -150,6 +155,10 @@ delete policy.
   KairosFleetCluster cannot resolve its AuroraBoot connection: check that the
   admin-token Secret exists in the same namespace and has a non-empty `token`
   key, and that `spec.auroraboot.url` is reachable from the controller pod.
+- **Machine stuck at `GroupNotFound`.** `spec.group` does not resolve to an
+  AuroraBoot group by name or ID. Check the value:
+  `kubectl get kairosfleetmachine -n demo -o jsonpath='{.items[0].spec.group}'`,
+  and confirm a group with that exact name (or ID) exists in AuroraBoot.
 - **Machine stuck at `WaitingForCapacity`.** The target group has no
   unclaimed nodes. Confirm the group name matches an AuroraBoot group with
   enrolled nodes: `kubectl get kairosfleetmachine -n demo -o jsonpath='{.items[0].spec.group}'`.
@@ -165,5 +174,6 @@ delete policy.
   `kairos-fleet://...`.** The bootstrap cloud-config must include the fleet
   providerID self-discovery path (implemented for k3s and k0s in the Kairos
   bootstrap provider). Confirm the `KairosConfigTemplate` distribution matches
-  your Kairos image (this quickstart uses k3s) and that the node image runs the
-  Kairos phone-home agent with persisted credentials.
+  your Kairos image (this quickstart uses k3s; k0s also works, see
+  [ARCHITECTURE.md](ARCHITECTURE.md#providerid)) and that the node image runs
+  the Kairos phone-home agent with persisted credentials.

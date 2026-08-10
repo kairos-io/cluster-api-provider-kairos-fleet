@@ -1,6 +1,6 @@
 # Architecture
 
-> Last verified against: cluster-api-provider-kairos-fleet commit `23b1416`,
+> Last verified against: cluster-api-provider-kairos-fleet v0.1.0,
 > Cluster API v1.13.4 (v1beta2 contract), Kairos v4.1.2.
 
 This is the public overview of how the Kairos Fleet infrastructure provider
@@ -58,7 +58,7 @@ to re-run from any point:
 | Step | Condition to advance | What happens |
 | --- | --- | --- |
 | Wait for bootstrap | `Machine.spec.bootstrap.dataSecretName` is not yet set | Requeue; `WaitingForBootstrapData`. |
-| Claim | No `node-id` annotation yet | Claim a node from `spec.group` using the KairosFleetMachine's UID as a stable claim key, so a retried reconcile finds the same node instead of claiming a second one. No capacity in the group requeues as `WaitingForCapacity`, not an error. |
+| Claim | No `node-id` annotation yet | Resolve `spec.group` (a name or an ID) to the group's ID, then claim a node from it using the KairosFleetMachine's UID as a stable claim key, so a retried reconcile finds the same node instead of claiming a second one. A group that does not resolve requeues as `GroupNotFound`; no capacity in the resolved group requeues as `WaitingForCapacity`. Neither is an error. |
 | Apply cloud-config | Node claimed, config not yet applied | Fetch the bootstrap Secret's `value` key and hand it to AuroraBoot unmodified as an apply-cloud-config command. AuroraBoot stages the config to the node's `/oem` overlay; it does not reboot on its own. |
 | Reboot | The apply-cloud-config command reports `Completed` | Issue a reboot command and record the time it was requested. |
 | Wait for rejoin | Reboot issued | Poll the node; it has rejoined once its phase is `Online` and its last heartbeat is newer than the recorded reboot time. Using heartbeat-after-reboot rather than a phase transition means a reconcile that misses the transient `Offline` window still detects the rejoin correctly. |
@@ -147,6 +147,11 @@ reboot, release).
 
 ## v0.1 limitations
 
+- **The exercised topology is one control-plane machine plus a
+  `MachineDeployment` of workers.** High-availability control planes
+  (`KairosControlPlane.spec.replicas` greater than 1) are out of scope for
+  this provider; nothing here prevents claiming more control-plane nodes, but
+  the multi-control-plane join path has not been validated against a fleet.
 - **Addresses are hostname-only.** `status.addresses` mirrors a single
   `Hostname` address derived from the node's reported hostname; AuroraBoot
   does not yet expose a structured internal IP through the client this

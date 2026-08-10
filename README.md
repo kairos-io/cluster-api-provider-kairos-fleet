@@ -13,12 +13,27 @@ that phone home to AuroraBoot.
 
 ## Status
 
-Beta, v1alpha1 API. First release: v0.1.0-beta.1. The exercised path is a
-single control-plane machine plus a `MachineDeployment` of worker machines,
-running k3s, claimed from named AuroraBoot groups. See
-[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full design and current
-limitations, and [docs/QUICKSTART.md](docs/QUICKSTART.md) to provision a
-cluster.
+Stable, v1alpha1 API. First usable release: v0.1.0.
+
+`v0.1.0-beta.1` is superseded and must not be used: its generated metrics
+Service name exceeded Kubernetes' 63-character limit, so `clusterctl init`
+could not apply it, and even a manually patched install crash-looped on a
+real management cluster because the manager's scheme never registered the
+Cluster API core types. v0.1.0 fixes both, plus a group-claim bug where
+`spec.group` names were passed straight to AuroraBoot's UUID-keyed claim
+endpoint and always failed. See
+[docs/release-notes/v0.1.0.md](docs/release-notes/v0.1.0.md) for the full
+list of fixes.
+
+The exercised topology is a single control-plane machine plus a
+`MachineDeployment` of worker machines, claimed from named AuroraBoot groups.
+It has been validated end to end on real hardware for both k3s and k0s
+workload clusters, together with the [Kairos bootstrap and control-plane
+providers](https://github.com/kairos-io/cluster-api-provider-kairos) at
+v0.1.0. High-availability control planes (`replicas` greater than 1) are out
+of scope for this provider. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
+for the full design and current limitations, and
+[docs/QUICKSTART.md](docs/QUICKSTART.md) to provision a cluster.
 
 ## API types
 
