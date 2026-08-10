@@ -1,6 +1,6 @@
 # API reference
 
-> Last verified against: cluster-api-provider-kairos-fleet commit `23b1416`,
+> Last verified against: cluster-api-provider-kairos-fleet v0.1.0,
 > API group `infrastructure.cluster.x-k8s.io/v1alpha1`.
 
 A hand-written field reference for the four Kairos Fleet API kinds. For the
@@ -38,7 +38,7 @@ AuroraBoot node.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
-| `group` | string | Yes | AuroraBoot group to claim a node from. Must already exist and hold unclaimed, enrolled nodes. |
+| `group` | string | Yes | AuroraBoot group to claim a node from. Accepts either the group's name or its ID; the controller resolves it to the ID before claiming. Must already exist and hold unclaimed, enrolled nodes; a name that does not (yet) resolve is a transient `GroupNotFound` wait, not a terminal failure. |
 | `providerID` | string | No, set by the controller | `kairos-fleet://<node-id>` once a node is claimed and confirmed rejoined. Immutable once set; do not set it yourself. |
 
 ### status
