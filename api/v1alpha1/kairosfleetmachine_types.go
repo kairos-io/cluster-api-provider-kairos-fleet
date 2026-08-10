@@ -36,9 +36,12 @@ const (
 
 // KairosFleetMachineSpec defines the desired state of KairosFleetMachine.
 type KairosFleetMachineSpec struct {
-	// group is the AuroraBoot group to claim a node from. The group must already exist in
-	// AuroraBoot and hold enrolled, unclaimed nodes; an empty group yields a transient
-	// "waiting for capacity" state rather than a failure.
+	// group is the AuroraBoot group to claim a node from. It accepts either the group's
+	// name or its ID; the controller resolves a name to the group's ID before claiming.
+	// The group must already exist in AuroraBoot and hold enrolled, unclaimed nodes. A
+	// group that does not resolve is a transient "GroupNotFound" wait, and a resolved
+	// group with no unclaimed nodes is a transient "waiting for capacity" wait; neither
+	// is a failure.
 	// +required
 	// +kubebuilder:validation:MinLength=1
 	Group string `json:"group"`
