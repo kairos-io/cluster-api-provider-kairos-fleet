@@ -20,7 +20,7 @@ namePrefix: capi-kairos-fleet-
 labels:
 - includeSelectors: false
   pairs:
-    cluster.x-k8s.io/provider: infrastructure-kairos-fleet
+    cluster.x-k8s.io/provider: infrastructure-kairos-io-fleet
 
 resources:
 - ../crd
