@@ -11,6 +11,11 @@ node to reboot and rejoin, tracks its reported addresses, and releases the node
 when the machine is deleted. It targets bare metal and pre-provisioned nodes
 that phone home to AuroraBoot.
 
+> **Found a bug, or want to request a feature?** Open it on
+> [kairos-io/kairos](https://github.com/kairos-io/kairos/issues), including
+> issues about this repository. Every Kairos issue lives in one place, so you
+> never have to work out which repository to file against.
+
 ## Status
 
 Stable, v1alpha1 API. First usable release: v0.1.0.
