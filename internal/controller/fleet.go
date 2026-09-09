@@ -42,6 +42,13 @@ const (
 	cloudConfigAppliedAnnotation = "kairos-fleet.infrastructure.cluster.x-k8s.io/cloud-config-applied"
 	cloudConfigAppliedValue      = "true"
 
+	// cloudConfigCommandIDAnnotation records the ID of the apply-cloud-config
+	// command the controller queued, so its outcome is read from that command and
+	// not from an older apply against the same node. AuroraBoot never prunes a
+	// node's command history, so a failed first attempt would otherwise shadow
+	// every later success.
+	cloudConfigCommandIDAnnotation = "kairos-fleet.infrastructure.cluster.x-k8s.io/cloud-config-command-id"
+
 	// rebootRequestedAtAnnotation records (RFC3339) when the controller issued the
 	// reboot that applies the staged cloud-config, so rejoin can be detected as a
 	// node heartbeat newer than this time.

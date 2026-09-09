@@ -45,6 +45,12 @@ import (
 const (
 	waitForCapacityRequeue = 30 * time.Second
 	waitForRejoinRequeue   = 15 * time.Second
+
+	// retryCloudConfigRequeue paces re-queuing apply-cloud-config after the node
+	// rejected or failed it. Long enough that a node whose phonehome policy will
+	// never permit the command does not accumulate failures quickly, short enough
+	// that fixing the policy visibly unblocks the machine.
+	retryCloudConfigRequeue = 60 * time.Second
 )
 
 // KairosFleetMachineReconciler reconciles a KairosFleetMachine object.
@@ -176,10 +182,15 @@ func (r *KairosFleetMachineReconciler) reconcileNormal(ctx context.Context, flee
 		if err != nil {
 			return ctrl.Result{}, err
 		}
-		if _, err := fc.ApplyCloudConfig(ctx, nodeID, data); err != nil {
+		cmd, err := fc.ApplyCloudConfig(ctx, nodeID, data)
+		if err != nil {
 			return ctrl.Result{}, fmt.Errorf("applying cloud-config to node %s: %w", nodeID, err)
 		}
-		annotations.AddAnnotations(fleetMachine, map[string]string{cloudConfigAppliedAnnotation: cloudConfigAppliedValue})
+		applied := map[string]string{cloudConfigAppliedAnnotation: cloudConfigAppliedValue}
+		if cmd != nil && cmd.ID != "" {
+			applied[cloudConfigCommandIDAnnotation] = cmd.ID
+		}
+		annotations.AddAnnotations(fleetMachine, applied)
 		log.Info("Applied bootstrap cloud-config", "nodeID", nodeID)
 		r.notReady(fleetMachine, "ApplyingCloudConfig", "Bootstrap cloud-config applied; waiting for the node to reboot and rejoin")
 		return ctrl.Result{RequeueAfter: waitForRejoinRequeue}, nil
@@ -189,10 +200,22 @@ func (r *KairosFleetMachineReconciler) reconcileNormal(ctx context.Context, flee
 	// processes the staged /oem config (apply-cloud-config writes the file but does
 	// not reboot).
 	if fleetMachine.Annotations[rebootRequestedAtAnnotation] == "" {
-		applied, failed, failMsg := r.applyState(ctx, fc, nodeID)
+		applied, failed, failMsg := r.applyState(ctx, fc, nodeID, fleetMachine.Annotations[cloudConfigCommandIDAnnotation])
 		if failed {
-			r.fail(fleetMachine, "CloudConfigFailed", fmt.Sprintf("apply-cloud-config failed on node %s: %s", nodeID, failMsg))
-			return ctrl.Result{}, nil
+			// A failed apply is recoverable, not terminal: the usual cause is a
+			// node-side phonehome policy that does not permit apply-cloud-config,
+			// which the operator fixes on the node. Drop the applied markers so the
+			// next pass queues a fresh command, and requeue — marking the machine
+			// failed here would strand it even once the node is fixed.
+			r.notReady(fleetMachine, "CloudConfigFailed", fmt.Sprintf("apply-cloud-config failed on node %s: %s", nodeID, failMsg))
+			// Clear a terminal failure left by an earlier build, which marked this
+			// same state failed; without this an upgraded machine stays failed.
+			fleetMachine.Status.FailureReason = nil
+			fleetMachine.Status.FailureMessage = nil
+			delete(fleetMachine.Annotations, cloudConfigAppliedAnnotation)
+			delete(fleetMachine.Annotations, cloudConfigCommandIDAnnotation)
+			log.Info("apply-cloud-config failed; retrying with a fresh command", "nodeID", nodeID)
+			return ctrl.Result{RequeueAfter: retryCloudConfigRequeue}, nil
 		}
 		if !applied {
 			log.Info("Waiting for apply-cloud-config to complete on node", "nodeID", nodeID)
@@ -283,26 +306,62 @@ func (r *KairosFleetMachineReconciler) rejoinedAfterReboot(fleetMachine *infrav1
 	return node.LastHeartbeat.After(rebootedAt)
 }
 
-// applyState reports whether the apply-cloud-config command completed and, if it
-// failed, the failure message.
-func (r *KairosFleetMachineReconciler) applyState(ctx context.Context, fc fleet.Client, nodeID string) (completed, failed bool, failMsg string) {
+// applyState reports whether the apply-cloud-config command identified by cmdID
+// completed and, if it failed, the failure message.
+//
+// AuroraBoot retains every command ever queued for a node, so the outcome must be
+// read from the command this controller queued. When cmdID is empty — a machine
+// first reconciled by a build that did not record it — fall back to the most
+// recently created apply-cloud-config. Matching the first entry instead would let
+// one early failure shadow every later success, permanently.
+func (r *KairosFleetMachineReconciler) applyState(ctx context.Context, fc fleet.Client, nodeID, cmdID string) (completed, failed bool, failMsg string) {
 	cmds, err := fc.GetCommands(ctx, nodeID)
 	if err != nil {
 		// Treat a transient list error as "not yet completed"; the caller requeues.
 		return false, false, ""
 	}
+
+	var latest *fleet.Command
 	for i := range cmds {
-		if cmds[i].Command != fleet.CommandApplyCloudConfig {
+		cmd := &cmds[i]
+		if cmdID != "" {
+			if cmd.ID == cmdID {
+				latest = cmd
+				break
+			}
 			continue
 		}
-		switch cmds[i].Phase {
-		case fleet.CommandPhaseCompleted:
-			return true, false, ""
-		case fleet.CommandPhaseFailed, fleet.CommandPhaseExpired:
-			return false, true, cmds[i].Result
+		if cmd.Command != fleet.CommandApplyCloudConfig {
+			continue
+		}
+		if latest == nil || newerCommand(cmd, latest) {
+			latest = cmd
 		}
 	}
+	if latest == nil {
+		return false, false, ""
+	}
+
+	switch latest.Phase {
+	case fleet.CommandPhaseCompleted:
+		return true, false, ""
+	case fleet.CommandPhaseFailed, fleet.CommandPhaseExpired:
+		return false, true, latest.Result
+	}
 	return false, false, ""
+}
+
+// newerCommand reports whether a was created after b. A command AuroraBoot did not
+// timestamp counts as the newer one, so a response with no createdAt at all still
+// resolves to the last entry in the list rather than the first.
+func newerCommand(a, b *fleet.Command) bool {
+	if a.CreatedAt == nil {
+		return true
+	}
+	if b.CreatedAt == nil {
+		return false
+	}
+	return a.CreatedAt.After(*b.CreatedAt)
 }
 
 // fleetClientFor resolves a fleet.Client from the cluster's KairosFleetCluster. It

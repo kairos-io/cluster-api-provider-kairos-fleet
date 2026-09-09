@@ -181,3 +181,30 @@ func TestResolveGroupID(t *testing.T) {
 		})
 	}
 }
+
+// GetCommands must carry AuroraBoot's createdAt through, so a caller can tell an
+// old apply-cloud-config from the one it just queued.
+func TestGetCommands_ParsesCreatedAt(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`[
+			{"id":"c1","command":"apply-cloud-config","phase":"Failed","result":"denied","createdAt":"2026-09-09T20:30:10.103935894Z"},
+			{"id":"c2","command":"apply-cloud-config","phase":"Completed","createdAt":"2026-09-09T20:46:38.315150766Z"}
+		]`))
+	}))
+	defer srv.Close()
+
+	cmds, err := New(srv.URL, "tok").GetCommands(context.Background(), "n1")
+	if err != nil {
+		t.Fatalf("GetCommands: %v", err)
+	}
+	if len(cmds) != 2 {
+		t.Fatalf("got %d commands, want 2", len(cmds))
+	}
+	if cmds[0].CreatedAt == nil || cmds[1].CreatedAt == nil {
+		t.Fatalf("createdAt not parsed: %+v", cmds)
+	}
+	if !cmds[1].CreatedAt.After(*cmds[0].CreatedAt) {
+		t.Errorf("c2 (%v) should be newer than c1 (%v)", cmds[1].CreatedAt, cmds[0].CreatedAt)
+	}
+}
