@@ -35,7 +35,7 @@ The exercised topology is a single control-plane machine plus a
 It has been validated end to end on real hardware for both k3s and k0s
 workload clusters, together with the [Kairos bootstrap and control-plane
 providers](https://github.com/kairos-io/cluster-api-provider-kairos) at
-v0.1.0. High-availability control planes (`replicas` greater than 1) are out
+v0.1.2. High-availability control planes (`replicas` greater than 1) are out
 of scope for this provider. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
 for the full design and current limitations, and
 [docs/QUICKSTART.md](docs/QUICKSTART.md) to provision a cluster.

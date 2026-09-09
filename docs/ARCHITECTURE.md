@@ -1,6 +1,6 @@
 # Architecture
 
-> Last verified against: cluster-api-provider-kairos-fleet v0.1.0,
+> Last verified against: cluster-api-provider-kairos-fleet v0.1.2,
 > Cluster API v1.13.4 (v1beta2 contract), Kairos v4.1.2.
 
 This is the public overview of how the Kairos Fleet infrastructure provider
