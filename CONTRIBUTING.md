@@ -1,6 +1,6 @@
 # Contributing
 
-> Last verified against: cluster-api-provider-kairos-fleet v0.1.0;
+> Last verified against: cluster-api-provider-kairos-fleet v0.1.2;
 > CI workflows in `.github/workflows/`.
 
 ## Development setup

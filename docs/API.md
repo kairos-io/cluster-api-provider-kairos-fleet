@@ -1,6 +1,6 @@
 # API reference
 
-> Last verified against: cluster-api-provider-kairos-fleet v0.1.0,
+> Last verified against: cluster-api-provider-kairos-fleet v0.1.2,
 > API group `infrastructure.cluster.x-k8s.io/v1alpha1`.
 
 A hand-written field reference for the four Kairos Fleet API kinds. For the
@@ -58,6 +58,7 @@ These are set by the controller, not the user:
 | --- | --- |
 | `kairos-fleet.infrastructure.cluster.x-k8s.io/node-id` | The claimed AuroraBoot node's ID. Source of `spec.providerID` and the release call on delete. |
 | `kairos-fleet.infrastructure.cluster.x-k8s.io/cloud-config-applied` | Marks that the bootstrap cloud-config has been handed to AuroraBoot, so it is not re-applied on every reconcile. Cleared automatically if the apply-cloud-config command later reports `Failed` or `Expired`, so a fixed node gets a fresh apply on the next reconcile. |
+| `kairos-fleet.infrastructure.cluster.x-k8s.io/cloud-config-command-id` | The ID of the apply-cloud-config command the controller queued. Its outcome is read back from this exact command, not the first apply-cloud-config found for the node: AuroraBoot never prunes a node's command history, so an earlier failed attempt would otherwise shadow every later success. Cleared alongside `cloud-config-applied` on a `Failed` or `Expired` outcome. |
 | `kairos-fleet.infrastructure.cluster.x-k8s.io/reboot-requested-at` | RFC 3339 timestamp of the reboot the controller requested to apply the staged config; used to detect rejoin. |
 
 ## KairosFleetClusterTemplate

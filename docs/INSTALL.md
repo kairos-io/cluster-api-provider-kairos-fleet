@@ -1,6 +1,6 @@
 # Install
 
-> Last verified against: cluster-api-provider-kairos-fleet v0.1.0,
+> Last verified against: cluster-api-provider-kairos-fleet v0.1.2,
 > Cluster API v1.13.4 (v1beta2 contract), release pipeline in
 > `.github/workflows/release.yml`.
 
@@ -49,7 +49,7 @@ alongside each other in the same release: `infrastructure-components.yaml`
 `metadata.yaml` (the clusterctl contract and version-series mapping), and
 `cluster-template.yaml` (the default `clusterctl generate cluster` template).
 Point `url` at a specific tag instead of `latest` to pin a version, for
-example `.../releases/download/v0.1.0/infrastructure-components.yaml`. Do not
+example `.../releases/download/v0.1.2/infrastructure-components.yaml`. Do not
 pin `v0.1.0-beta.1`: it is superseded and is not installable through
 `clusterctl init` at all (see
 [docs/release-notes/v0.1.0.md](release-notes/v0.1.0.md)).

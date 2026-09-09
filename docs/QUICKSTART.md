@@ -1,6 +1,6 @@
 # Quickstart
 
-> Last verified against: cluster-api-provider-kairos-fleet v0.1.0,
+> Last verified against: cluster-api-provider-kairos-fleet v0.1.2,
 > Cluster API v1.13.4 (v1beta2 contract), Kairos v4.1.2, k3s (k0s also
 > supported).
 
@@ -164,6 +164,7 @@ kubectl get kairosfleetmachines -n demo -w
 | `CloudConfigFailed` | The apply-cloud-config command reported `Failed` or `Expired` — commonly because the node's AuroraBoot phonehome policy does not permit the command (see "AuroraBoot node enrolment prerequisite" above). Not terminal: the controller clears the applied-config marker and retries automatically once the node accepts the command. |
 | `Rebooting` | The controller has requested a reboot so the node applies the staged config. |
 | `WaitingForNodeRejoin` | Waiting for the node to come back `Online` with a heartbeat newer than the reboot request. |
+| `NodeMissing` | The claimed AuroraBoot node no longer exists. Terminal: `status.failureReason` and `status.failureMessage` are set; the machine does not retry itself. |
 | `Provisioned` | The node is claimed, configured, and Online. `spec.providerID` and `status.addresses` are set. |
 
 A machine stuck on `WaitingForCapacity` needs more enrolled nodes in that
