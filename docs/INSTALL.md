@@ -21,6 +21,14 @@ built-in provider list, so it needs a one-time `clusterctl.yaml` entry before
 - Network access from your workstation (or wherever `clusterctl init` runs)
   to `github.com`, to fetch the release assets, or a local/air-gapped
   clusterctl override repository if you mirror releases internally.
+- AuroraBoot nodes enrolled with a `phonehome.allowed_commands` policy that
+  permits `apply-cloud-config`, `reboot`, and `reset`. AuroraBoot's
+  install-agent enrolment script defaults to a narrower policy
+  (`upgrade,upgrade-recovery,reboot,unregister`) that rejects the commands
+  this provider issues, which fails a node's very first bootstrap apply. This
+  is the most common first-run failure. See
+  [QUICKSTART.md](QUICKSTART.md#auroraboot-node-enrolment-prerequisite) for
+  both ways to set this, and how to fix an already-enrolled node.
 
 ## 1. Register the provider with clusterctl
 
@@ -88,7 +96,7 @@ clusterctl delete --infrastructure kairos-fleet
 
 This does not release AuroraBoot nodes claimed by existing
 KairosFleetMachines: delete the Clusters first (see
-[QUICKSTART.md](QUICKSTART.md#6-tear-down)) so their nodes are released, then
+[QUICKSTART.md](QUICKSTART.md#7-tear-down)) so their nodes are released, then
 uninstall the provider.
 
 ## Next steps
