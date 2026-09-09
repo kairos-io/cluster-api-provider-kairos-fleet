@@ -48,7 +48,7 @@ AuroraBoot node.
 | `initialization.provisioned` | bool | The Cluster API v1beta2 InfraMachine readiness signal. True once the node is claimed, its cloud-config applied, and it has rejoined `Online`. |
 | `addresses` | `[]clusterv1.MachineAddress` | A single `Hostname` address in v0.1 (see [ARCHITECTURE.md](ARCHITECTURE.md)). |
 | `conditions` | `[]metav1.Condition` | Includes a `Ready` condition; see [QUICKSTART.md](QUICKSTART.md) for the reason values it cycles through. |
-| `failureReason` / `failureMessage` | string | Set only on a terminal, unrecoverable failure (a failed apply-cloud-config command, or a claimed node that disappears from AuroraBoot). |
+| `failureReason` / `failureMessage` | string | Set only on a terminal, unrecoverable failure: a claimed node that disappears from AuroraBoot entirely. A failed or expired `apply-cloud-config` command is not terminal; it sets a `CloudConfigFailed` `Ready` condition and is retried automatically (see [QUICKSTART.md](QUICKSTART.md)). |
 
 ### Annotations the controller manages
 
@@ -57,7 +57,7 @@ These are set by the controller, not the user:
 | Annotation | Purpose |
 | --- | --- |
 | `kairos-fleet.infrastructure.cluster.x-k8s.io/node-id` | The claimed AuroraBoot node's ID. Source of `spec.providerID` and the release call on delete. |
-| `kairos-fleet.infrastructure.cluster.x-k8s.io/cloud-config-applied` | Marks that the bootstrap cloud-config has been handed to AuroraBoot, so it is not re-applied on every reconcile. |
+| `kairos-fleet.infrastructure.cluster.x-k8s.io/cloud-config-applied` | Marks that the bootstrap cloud-config has been handed to AuroraBoot, so it is not re-applied on every reconcile. Cleared automatically if the apply-cloud-config command later reports `Failed` or `Expired`, so a fixed node gets a fresh apply on the next reconcile. |
 | `kairos-fleet.infrastructure.cluster.x-k8s.io/reboot-requested-at` | RFC 3339 timestamp of the reboot the controller requested to apply the staged config; used to detect rejoin. |
 
 ## KairosFleetClusterTemplate

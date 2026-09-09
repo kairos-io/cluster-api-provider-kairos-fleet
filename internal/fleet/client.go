@@ -70,12 +70,16 @@ type Node struct {
 	LastHeartbeat *time.Time
 }
 
-// Command is a queued node command and its execution state.
+// Command is a queued node command and its execution state. CreatedAt orders a
+// node's commands: AuroraBoot keeps every command it has ever queued for a node,
+// so a caller looking for "the outcome of the apply I just issued" must select by
+// ID, or failing that by recency — never by first match.
 type Command struct {
-	ID      string
-	Command string
-	Phase   string
-	Result  string
+	ID        string
+	Command   string
+	Phase     string
+	Result    string
+	CreatedAt *time.Time
 }
 
 // Group is the subset of an AuroraBoot group the provider needs to resolve a

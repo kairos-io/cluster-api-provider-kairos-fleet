@@ -271,14 +271,15 @@ func (d *nodeDTO) toNode() *Node {
 
 // commandDTO mirrors the AuroraBoot NodeCommand JSON shape.
 type commandDTO struct {
-	ID      string `json:"id"`
-	Command string `json:"command"`
-	Phase   string `json:"phase"`
-	Result  string `json:"result,omitempty"`
+	ID        string     `json:"id"`
+	Command   string     `json:"command"`
+	Phase     string     `json:"phase"`
+	Result    string     `json:"result,omitempty"`
+	CreatedAt *time.Time `json:"createdAt,omitempty"`
 }
 
 func (d *commandDTO) toCommand() *Command {
-	return &Command{ID: d.ID, Command: d.Command, Phase: d.Phase, Result: d.Result}
+	return &Command{ID: d.ID, Command: d.Command, Phase: d.Phase, Result: d.Result, CreatedAt: d.CreatedAt}
 }
 
 // createCommandDTO is the POST body for queuing a node command.

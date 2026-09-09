@@ -65,10 +65,16 @@ to re-run from any point:
 | Provisioned | Rejoin confirmed | Set `status.addresses`, `spec.providerID`, `status.initialization.provisioned = true`, and the `Ready` condition. |
 | Delete | `deletionTimestamp` set | Release the claimed node back to its group using the same claim key, then remove the finalizer. |
 
-A command that reports `Failed` or `Expired` during the apply step, or a
-claimed node that disappears from AuroraBoot entirely, is a terminal failure:
-`status.failureReason` and `status.failureMessage` are set and the machine
-does not retry itself. Delete and re-create the Machine to try again.
+A command that reports `Failed` or `Expired` during the apply-cloud-config
+step sets a `CloudConfigFailed` `Ready` condition and is not terminal: the
+controller clears the applied-config marker and re-issues a fresh
+apply-cloud-config command about once a minute, so fixing whatever rejected
+the command — most commonly the node's AuroraBoot phonehome policy, see
+[QUICKSTART.md](QUICKSTART.md) — unsticks the machine with no manual
+intervention. A claimed node that disappears from AuroraBoot entirely is
+still a terminal failure: `status.failureReason` and `status.failureMessage`
+are set and the machine does not retry itself; delete and re-create the
+Machine to try again.
 
 The `KairosFleetCluster` controller is simpler: it validates the AuroraBoot
 connection (the admin-token Secret must exist and hold a non-empty `token`

@@ -40,6 +40,10 @@ const (
 	testNS       = "default"
 	testNodeID   = "node-abc"
 	testHostname = "worker-1"
+
+	// fakeApplyCommandID is the command ID fleet.FakeClient.ApplyCloudConfig
+	// returns; the reconciler records it and reads that command's outcome back.
+	fakeApplyCommandID = "fake-cmd"
 )
 
 func testScheme(t *testing.T) *runtime.Scheme {
@@ -196,7 +200,9 @@ func TestMachineReconcile_RebootsThenProvisions(t *testing.T) {
 			return &fleet.Node{ID: testNodeID, Hostname: testHostname, Phase: fleet.PhaseOnline, LastHeartbeat: &hb}, nil
 		},
 		GetCommandsFunc: func(_ context.Context, _ string) ([]fleet.Command, error) {
-			return []fleet.Command{{Command: fleet.CommandApplyCloudConfig, Phase: fleet.CommandPhaseCompleted}}, nil
+			// ID matches what FakeClient.ApplyCloudConfig returned, so the reconciler
+			// reads the outcome of the command it actually queued.
+			return []fleet.Command{{ID: fakeApplyCommandID, Command: fleet.CommandApplyCloudConfig, Phase: fleet.CommandPhaseCompleted}}, nil
 		},
 	}
 	r, c := newReconciler(t, fc, testFixture(true))
@@ -230,7 +236,7 @@ func TestMachineReconcile_WaitsForApplyBeforeReboot(t *testing.T) {
 		},
 		GetCommandsFunc: func(_ context.Context, _ string) ([]fleet.Command, error) {
 			// apply-cloud-config still running -> must not reboot yet.
-			return []fleet.Command{{Command: fleet.CommandApplyCloudConfig, Phase: fleet.CommandPhaseRunning}}, nil
+			return []fleet.Command{{ID: fakeApplyCommandID, Command: fleet.CommandApplyCloudConfig, Phase: fleet.CommandPhaseRunning}}, nil
 		},
 	}
 	r, _ := newReconciler(t, fc, testFixture(true))
@@ -337,5 +343,124 @@ func TestMachineReconcile_ReleasesOnDelete(t *testing.T) {
 	err := c.Get(context.Background(), types.NamespacedName{Namespace: testNS, Name: "kfm"}, &infrav1.KairosFleetMachine{})
 	if err == nil {
 		t.Fatalf("expected KFM to be removed after finalizer cleared")
+	}
+}
+
+// A node whose phonehome policy rejects apply-cloud-config leaves a Failed command
+// behind forever: AuroraBoot never prunes a node's command history. Selecting the
+// first apply-cloud-config would let that one failure shadow every later success,
+// so the reconciler must read back the command it queued.
+func TestMachineReconcile_IgnoresAnEarlierFailedApply(t *testing.T) {
+	older := time.Now().Add(-time.Hour)
+	newer := time.Now()
+	hb := time.Now().Add(time.Hour)
+	fc := &fleet.FakeClient{
+		ClaimFunc: func(_ context.Context, _, _ string) (*fleet.Node, error) {
+			return &fleet.Node{ID: testNodeID, Hostname: testHostname, Phase: fleet.PhaseOnline}, nil
+		},
+		GetNodeFunc: func(_ context.Context, _ string) (*fleet.Node, error) {
+			return &fleet.Node{ID: testNodeID, Hostname: testHostname, Phase: fleet.PhaseOnline, LastHeartbeat: &hb}, nil
+		},
+		GetCommandsFunc: func(_ context.Context, _ string) ([]fleet.Command, error) {
+			return []fleet.Command{
+				{
+					ID: "stale-cmd", Command: fleet.CommandApplyCloudConfig,
+					Phase:  fleet.CommandPhaseFailed,
+					Result: `command "apply-cloud-config" is not permitted by the phonehome policy`,
+					// Deliberately first in the slice and older.
+					CreatedAt: &older,
+				},
+				{
+					ID: fakeApplyCommandID, Command: fleet.CommandApplyCloudConfig,
+					Phase: fleet.CommandPhaseCompleted, CreatedAt: &newer,
+				},
+			}, nil
+		},
+	}
+	r, c := newReconciler(t, fc, testFixture(true))
+
+	reconcileKFM(t, r) // claim
+	reconcileKFM(t, r) // apply
+	reconcileKFM(t, r) // read back OUR command -> completed -> reboot
+	if len(fc.Reboots) != 1 {
+		kfm := getKFM(t, c)
+		t.Fatalf("expected the stale failure to be ignored and a reboot issued, got %+v, conditions=%+v", fc.Reboots, kfm.Status.Conditions)
+	}
+	reconcileKFM(t, r) // provisioned
+	if !ptr.Deref(getKFM(t, c).Status.Initialization.Provisioned, false) {
+		t.Fatalf("expected provisioned=true")
+	}
+}
+
+// With no recorded command ID (a machine first reconciled by an older build) the
+// newest apply-cloud-config wins, not the first one in the list.
+func TestApplyState_WithoutACommandIDPicksTheNewest(t *testing.T) {
+	older := time.Now().Add(-time.Hour)
+	newer := time.Now()
+	fc := &fleet.FakeClient{
+		GetCommandsFunc: func(_ context.Context, _ string) ([]fleet.Command, error) {
+			return []fleet.Command{
+				{ID: "old", Command: fleet.CommandApplyCloudConfig, Phase: fleet.CommandPhaseFailed, Result: "denied", CreatedAt: &older},
+				{ID: "new", Command: fleet.CommandApplyCloudConfig, Phase: fleet.CommandPhaseCompleted, CreatedAt: &newer},
+			}, nil
+		},
+	}
+	r := &KairosFleetMachineReconciler{}
+	completed, failed, msg := r.applyState(context.Background(), fc, testNodeID, "")
+	if !completed || failed {
+		t.Fatalf("completed=%v failed=%v msg=%q, want the newest (completed) command to win", completed, failed, msg)
+	}
+}
+
+// A failed apply must be retryable: the operator fixes the node's phonehome policy
+// and the controller has to issue a fresh command on its own. Marking the machine
+// terminally failed, or requeueing without clearing the applied markers, both leave
+// it stuck forever.
+func TestMachineReconcile_RetriesAFailedApply(t *testing.T) {
+	failing := true
+	fc := &fleet.FakeClient{
+		ClaimFunc: func(_ context.Context, _, _ string) (*fleet.Node, error) {
+			return &fleet.Node{ID: testNodeID, Hostname: testHostname, Phase: fleet.PhaseOnline}, nil
+		},
+		GetCommandsFunc: func(_ context.Context, _ string) ([]fleet.Command, error) {
+			phase := fleet.CommandPhaseCompleted
+			result := ""
+			if failing {
+				phase = fleet.CommandPhaseFailed
+				result = `command "apply-cloud-config" is not permitted by the phonehome policy`
+			}
+			return []fleet.Command{{ID: fakeApplyCommandID, Command: fleet.CommandApplyCloudConfig, Phase: phase, Result: result}}, nil
+		},
+	}
+	r, c := newReconciler(t, fc, testFixture(true))
+
+	reconcileKFM(t, r) // claim
+	reconcileKFM(t, r) // apply (1st)
+	res := reconcileKFM(t, r)
+
+	if res.RequeueAfter != retryCloudConfigRequeue {
+		t.Fatalf("RequeueAfter = %v, want %v so the apply is retried", res.RequeueAfter, retryCloudConfigRequeue)
+	}
+	kfm := getKFM(t, c)
+	if kfm.Status.FailureReason != nil || kfm.Status.FailureMessage != nil {
+		t.Fatalf("a rejected apply is recoverable and must not set a terminal failure, got reason=%v message=%v",
+			ptr.Deref(kfm.Status.FailureReason, ""), ptr.Deref(kfm.Status.FailureMessage, ""))
+	}
+	if kfm.Annotations[cloudConfigAppliedAnnotation] != "" || kfm.Annotations[cloudConfigCommandIDAnnotation] != "" {
+		t.Fatalf("expected the applied markers to be cleared so a fresh command is queued, got %v", kfm.Annotations)
+	}
+	if kfm.Annotations[infrav1.NodeIDAnnotation] != testNodeID {
+		t.Fatalf("the claim must be kept across a retry, got %q", kfm.Annotations[infrav1.NodeIDAnnotation])
+	}
+
+	// The operator fixes the node; the next pass queues a second apply and moves on.
+	failing = false
+	reconcileKFM(t, r) // apply (2nd)
+	if len(fc.Applies) != 2 {
+		t.Fatalf("expected a second apply-cloud-config after the retry, got %d", len(fc.Applies))
+	}
+	reconcileKFM(t, r) // completed -> reboot
+	if len(fc.Reboots) != 1 {
+		t.Fatalf("expected the retry to reach the reboot step, got %+v", fc.Reboots)
 	}
 }

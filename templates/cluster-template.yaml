@@ -9,11 +9,22 @@
 # A fleet cluster composes three providers: this infrastructure provider
 # (KairosFleet*), the Kairos bootstrap provider (KairosConfigTemplate), and the
 # Kairos control-plane provider (KairosControlPlane). Install all three with
-# `clusterctl init`. Nodes are claimed from AuroraBoot groups; create the admin-token
-# Secret (AURORABOOT_TOKEN_SECRET, key `token`) in the cluster's namespace first.
+# `clusterctl init`. Nodes are claimed from AuroraBoot groups.
 #
-# This example uses k3s. k0s is also supported: set distribution to k0s on both
-# the KairosControlPlane and the KairosConfigTemplate. k3s is the reference path.
+# Two Secrets must exist in the cluster's namespace before this is applied:
+#   - the AuroraBoot admin token (AURORABOOT_TOKEN_SECRET, key `token`);
+#   - the worker join token (K3S_TOKEN_SECRET_NAME, key `token`), whose value is
+#     /var/lib/rancher/k3s/server/token read from the control-plane node.
+#
+# Every node claimed for this cluster must also permit the commands the provider
+# issues. AuroraBoot's install-agent defaults do NOT include apply-cloud-config,
+# and a node enrolled with those defaults fails its first bootstrap apply; enrol
+# with AURORABOOT_ALLOWED_COMMANDS covering apply-cloud-config, reboot and reset.
+#
+# This example uses k3s, the reference path. For k0s set distribution to k0s on
+# the KairosControlPlane and both KairosConfigTemplates, and swap the worker's
+# k3sTokenSecretRef for workerTokenSecretRef holding the output of
+# `k0s token create --role worker` run on the control-plane node.
 ---
 apiVersion: cluster.x-k8s.io/v1beta2
 kind: Cluster
@@ -123,4 +134,11 @@ metadata:
 spec:
   template:
     spec:
+      # A worker needs an explicit role and a join token. Without the token the
+      # Kairos bootstrap webhook rejects every clone of this template, so the
+      # MachineDeployment can never create a Machine.
+      role: worker
       distribution: k3s
+      k3sTokenSecretRef:
+        name: ${K3S_TOKEN_SECRET_NAME:=${CLUSTER_NAME}-k3s-token}
+        key: token
