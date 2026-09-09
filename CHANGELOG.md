@@ -52,8 +52,10 @@ no migration steps from v0.1.1. See the
   builder digest had gone stale at Go 1.26.5, carrying eight stdlib CVEs fixed
   in 1.26.6; the digest is re-resolved to the tag's current 1.26.8. Indirect
   `google.golang.org/grpc` v1.82.1 to v1.83.2 fixes CVE-2026-84304 and
-  CVE-2026-84445. The image scan now reports zero fixable CRITICAL or HIGH
-  findings.
+  CVE-2026-84445. The `gcr.io/distroless/static:nonroot` runtime base digest is
+  refreshed at the same time, as hygiene rather than a fix. The image scan now
+  reports zero fixable CRITICAL or HIGH findings on both the base layer and the
+  manager binary.
 
 ### Documentation
 
