@@ -3,7 +3,7 @@
 #
 # golang:1.26-bookworm pinned by digest — keep the tag in sync with go.mod's `go`
 # directive and bump the digest via renovate/dependabot.
-FROM golang:1.26-bookworm@sha256:6c5605ab3a9a9fb3c4eafe5b3d63cdbf3881caf113262b67862547b54a9db599 AS builder
+FROM golang:1.26-bookworm@sha256:9fdc884aacc3bec89b20ffc69f4bb369c78210e3e4f600387b5128b12c199f81 AS builder
 ARG TARGETOS
 ARG TARGETARCH
 ARG VERSION=dev
