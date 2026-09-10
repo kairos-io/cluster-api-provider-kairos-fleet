@@ -5,7 +5,7 @@
 
 ## Development setup
 
-Requires Go 1.27. Clone the repository and use the `Makefile` targets:
+Requires Go 1.26 or newer. Clone the repository and use the `Makefile` targets:
 
 ```bash
 make manifests   # regenerate CRDs, RBAC, and webhook config from kubebuilder markers

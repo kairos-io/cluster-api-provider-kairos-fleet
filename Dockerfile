@@ -1,8 +1,11 @@
 # syntax=docker/dockerfile:1.7
 # Build the manager binary.
 #
-# golang:1.27-bookworm pinned by digest — keep the tag in sync with go.mod's `go`
-# directive and bump the digest via renovate/dependabot.
+# golang:1.27-bookworm pinned by digest. The builder must be at least go.mod's
+# `go` directive, not equal to it: a newer toolchain builds an older-directive
+# module fine, and the directive cannot be raised past what golangci-lint is
+# built with (it refuses to load a module targeting a newer Go than itself).
+# Bump the digest via renovate/dependabot.
 FROM golang:1.27-bookworm@sha256:648f440f42a0958804efb24df176f806f9d353b41f1c0627f666428e40310f6b AS builder
 ARG TARGETOS
 ARG TARGETARCH
