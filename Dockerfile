@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1.7
 # Build the manager binary.
 #
-# golang:1.26-bookworm pinned by digest — keep the tag in sync with go.mod's `go`
+# golang:1.27-bookworm pinned by digest — keep the tag in sync with go.mod's `go`
 # directive and bump the digest via renovate/dependabot.
 FROM golang:1.27-bookworm@sha256:648f440f42a0958804efb24df176f806f9d353b41f1c0627f666428e40310f6b AS builder
 ARG TARGETOS
