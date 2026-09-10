@@ -36,7 +36,7 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: "1.26"
+          go-version: "1.27"
           check-latest: true
 
       - name: Set up QEMU
@@ -91,6 +91,16 @@ jobs:
         with:
           # A tag containing a hyphen (e.g. v0.1.0-beta.1) is a pre-release.
           prerelease: ${{ contains(github.ref_name, '-') }}
+          # The curated notes for this release. With generate_release_notes also
+          # set, the action prepends this body to GitHub's generated section, so
+          # a release reads as the notes we wrote followed by the "What's
+          # Changed" list and its PR and contributor links.
+          #
+          # This makes docs/release-notes/<tag>.md REQUIRED at the tagged commit:
+          # the step fails if it is missing. That is deliberate — a release with
+          # no notes should not publish — but it means writing the notes is part
+          # of preparing a release, not an afterthought.
+          body_path: docs/release-notes/${{ github.ref_name }}.md
           generate_release_notes: true
           files: |
             out/infrastructure-components.yaml
