@@ -33,8 +33,10 @@ source change.
   client against an in-memory AuroraBoot server.
 - **govulncheck**: runs in CI against the module
   (`golang.org/x/vuln/cmd/govulncheck` v1.6.0).
-- **Trivy**: scans the built manager image for fixable CRITICAL and HIGH
-  vulnerabilities (`aquasecurity/trivy-action`).
+- **OSV-Scanner**: scans the module's declared dependencies against the OSV
+  database on every pull request, on pushes to `main`, and weekly, following
+  the kairos-io org practice. Results appear under Security > Code scanning.
+  Note this covers dependencies, not the runtime base image's OS packages.
 - **Lint**: `golangci-lint` v2.12.2, configured in `.golangci.yml`.
 - **End-to-end** (`make test-e2e`): the current suite is the kubebuilder
   scaffold placeholder; it deploys the manager to a kind cluster and checks it
@@ -43,7 +45,11 @@ source change.
   Kairos nodes is a manual lab procedure.
 
 Pull requests are gated by the `Tests` workflow (unit tests, envtest,
-govulncheck) and the `Lint` workflow. Both must pass before merge.
+govulncheck), the `Lint` workflow and the `OSV-Scanner` workflow. All must pass
+before merge.
+
+Dependency updates come from Renovate, configured in `renovate.json`. Its
+commits carry a `Signed-off-by` trailer so they satisfy the DCO check.
 
 ## Commit policy
 

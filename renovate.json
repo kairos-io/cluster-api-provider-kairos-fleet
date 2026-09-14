@@ -1,0 +1,125 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended",
+    "helpers:pinGitHubActionDigestsToSemver"
+  ],
+  "schedule": [
+    "after 11pm every weekday",
+    "before 7am every weekday",
+    "every weekend"
+  ],
+  "timezone": "Europe/Brussels",
+  "rebaseWhen": "behind-base-branch",
+  "semanticCommits": "enabled",
+  "commitBody": "Signed-off-by: {{{gitAuthor}}}",
+  "osvVulnerabilityAlerts": true,
+  "postUpdateOptions": [
+    "gomodTidy"
+  ],
+  "packageRules": [
+    {
+      "description": "Supply-chain inputs (actions, container images) are always human-reviewed; label them for triage.",
+      "matchManagers": [
+        "github-actions",
+        "dockerfile"
+      ],
+      "addLabels": [
+        "supply-chain"
+      ]
+    },
+    {
+      "description": "Org practice: automerge patch-level Go module updates once every check passes. platformAutomerge=false makes Renovate itself wait for all checks, independent of repo auto-merge settings.",
+      "matchManagers": [
+        "gomod"
+      ],
+      "matchDepTypes": [
+        "require",
+        "indirect"
+      ],
+      "matchUpdateTypes": [
+        "patch"
+      ],
+      "automerge": true,
+      "platformAutomerge": false
+    },
+    {
+      "description": "Let new module and action releases age before proposing them, so a compromised or yanked release is usually caught upstream first. Docker registries without timestamps are excluded.",
+      "matchDatasources": [
+        "go",
+        "github-tags",
+        "github-releases"
+      ],
+      "minimumReleaseAge": "3 days"
+    },
+    {
+      "description": "Actions are pinned to full-semver tags, so a digest-only change means the tag was moved (the tj-actions pattern). Never a routine PR: require explicit approval on the dependency dashboard.",
+      "matchManagers": [
+        "github-actions"
+      ],
+      "matchDepTypes": [
+        "action",
+        "workflow"
+      ],
+      "matchUpdateTypes": [
+        "digest"
+      ],
+      "dependencyDashboardApproval": true,
+      "addLabels": [
+        "tag-moved"
+      ]
+    },
+    {
+      "description": "go.mod's go directive is capped by golangci-lint, not by what Go has released: the linter refuses to load a module targeting a newer Go than the linter was itself built with. Raising it is a deliberate change made together with the lint job's go-version and a linter that supports it, so keep it off Renovate's routine queue. See the comment on go-version in .github/workflows/lint.yml.",
+      "matchManagers": [
+        "gomod"
+      ],
+      "matchDepTypes": [
+        "golang"
+      ],
+      "dependencyDashboardApproval": true
+    },
+    {
+      "description": "The builder image may run ahead of the go directive (builder >= directive is the invariant), but a major or minor bump still has to clear the same linter constraint, so it is reviewed rather than automerged.",
+      "groupName": "Go builder image",
+      "matchDatasources": [
+        "docker"
+      ],
+      "matchPackageNames": [
+        "golang"
+      ]
+    },
+    {
+      "description": "golangci-lint sets the ceiling on the Go version this repository can use, in the Makefile and the lint workflow together. Group them so the two pins never drift apart.",
+      "groupName": "golangci-lint",
+      "matchPackageNames": [
+        "golangci/golangci-lint",
+        "golangci/golangci-lint-action"
+      ]
+    },
+    {
+      "description": "Runtime base image: digest-pinned, and a digest-only refresh is the normal way it moves.",
+      "groupName": "distroless base image",
+      "matchDatasources": [
+        "docker"
+      ],
+      "matchPackageNames": [
+        "gcr.io/distroless/static"
+      ]
+    }
+  ],
+  "customManagers": [
+    {
+      "customType": "regex",
+      "description": "golangci-lint version mirrored in the Makefile and the lint workflow; both must move together.",
+      "managerFilePatterns": [
+        "/(^|/)Makefile$/"
+      ],
+      "matchStrings": [
+        "GOLANGCI_LINT_VERSION\\s*\\??=\\s*(?<currentValue>v\\S+)"
+      ],
+      "datasourceTemplate": "github-releases",
+      "depNameTemplate": "golangci/golangci-lint"
+    }
+  ]
+}
