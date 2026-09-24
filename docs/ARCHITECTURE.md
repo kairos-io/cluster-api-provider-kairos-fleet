@@ -173,10 +173,17 @@ reboot, release).
   (`KairosControlPlane.spec.replicas` greater than 1) are out of scope for
   this provider; nothing here prevents claiming more control-plane nodes, but
   the multi-control-plane join path has not been validated against a fleet.
-- **Addresses are hostname-only.** `status.addresses` mirrors a single
-  `Hostname` address derived from the node's reported hostname; AuroraBoot
-  does not yet expose a structured internal IP through the client this
-  provider uses.
+- **Addresses come from the agent, and are only as good as what it
+  reports.** `status.addresses` leads with a `Hostname` address derived from
+  the node's hostname and then mirrors AuroraBoot's `addresses` list, which the
+  Kairos agent fills in at register and heartbeat time. An agent that reports
+  none, or one older than that field, leaves the hostname alone. Cluster API
+  constrains `MachineAddress.type` to `Hostname`, `InternalIP`, `ExternalIP`,
+  `InternalDNS` and `ExternalDNS`, while AuroraBoot stores the type as a
+  free-form string, so an address of any other type is dropped here rather than
+  passed through to a status the apiserver would reject. AuroraBoot's
+  server-observed `remoteIP` is not surfaced: it is what the server saw the node
+  connect from, not an address the node claims, and it can be a NAT gateway.
 - **The control-plane endpoint is operator-supplied.** There is no VIP or
   load-balancer allocation; you provide and manage it.
 - **Delete always releases, never resets.** See "Delete: release versus

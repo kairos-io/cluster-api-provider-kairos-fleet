@@ -57,9 +57,30 @@ const (
 	CommandPhaseExpired   = "Expired"
 )
 
+// Node address types reported by AuroraBoot. They mirror Cluster API's
+// MachineAddressType values so a reported address can be surfaced on
+// Machine.status.addresses unchanged. AuroraBoot stores the type as a free-form
+// string so that a future type needs no server change, which means the provider
+// must treat any other value as unknown rather than pass it through: Cluster API
+// constrains MachineAddress.type to an enum, and the apiserver rejects a status
+// carrying anything else.
+const (
+	AddressInternalIP = "InternalIP"
+	AddressExternalIP = "ExternalIP"
+	AddressHostname   = "Hostname"
+)
+
+// NodeAddress is one network address a node reports, mirroring AuroraBoot's
+// store.NodeAddress and Cluster API's MachineAddress: a {type, address} pair.
+// Nodes report a list, because multi-NIC is normal.
+type NodeAddress struct {
+	Type    string
+	Address string
+}
+
 // Node is the subset of an AuroraBoot managed node the provider needs. AuroraBoot's
-// node representation does not (yet) expose structured addresses or a boot state; the
-// provider derives machine addresses from Hostname and readiness from Phase.
+// node representation does not (yet) expose a boot state; the provider derives
+// readiness from Phase.
 type Node struct {
 	ID            string
 	MachineID     string
@@ -68,6 +89,11 @@ type Node struct {
 	Phase         string
 	ClaimKey      *string
 	LastHeartbeat *time.Time
+	// Addresses are the network addresses the node itself reported at register or
+	// heartbeat time. The field is optional: an agent that does not collect them,
+	// or one older than the field, sends none, so a caller must still be able to
+	// fall back to Hostname.
+	Addresses []NodeAddress
 }
 
 // Command is a queued node command and its execution state. CreatedAt orders a

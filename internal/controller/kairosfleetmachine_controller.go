@@ -562,16 +562,53 @@ func (r *KairosFleetMachineReconciler) fleetFactory() FleetClientFactory {
 	return DefaultFleetClientFactory
 }
 
-// addressesFromNode derives machine addresses from the node's reported identity.
-// AuroraBoot does not expose structured addresses; the hostname is surfaced as a
-// Hostname address (see ADR 0001 §6).
+// machineAddressMaxLength is the upper bound Cluster API puts on
+// MachineAddress.address.
+const machineAddressMaxLength = 256
+
+// clusterAPIAddressTypes is the enum Cluster API constrains MachineAddress.type to.
+// AuroraBoot stores the type a node reports as a free-form string so a new type
+// needs no server change, so the provider matches it against this set rather than
+// passing it through: an address the apiserver would reject takes the whole status
+// update with it, including the providerID and the Ready condition.
+var clusterAPIAddressTypes = map[string]clusterv1.MachineAddressType{
+	string(clusterv1.MachineHostName):    clusterv1.MachineHostName,
+	string(clusterv1.MachineInternalIP):  clusterv1.MachineInternalIP,
+	string(clusterv1.MachineExternalIP):  clusterv1.MachineExternalIP,
+	string(clusterv1.MachineInternalDNS): clusterv1.MachineInternalDNS,
+	string(clusterv1.MachineExternalDNS): clusterv1.MachineExternalDNS,
+}
+
+// addressesFromNode maps the addresses a node reported to AuroraBoot onto Cluster
+// API machine addresses, led by the node's hostname. The hostname is always
+// available; the reported list is optional, because an agent that does not collect
+// addresses, or one older than the field, sends none.
+//
+// Addresses are kept in the order the node reported them: they describe its NICs
+// and the agent decides that order. An address whose type is not in Cluster API's
+// enum, or whose value is empty or longer than Cluster API accepts, is dropped
+// rather than passed through, and an exact repeat is reported once.
 func addressesFromNode(node *fleet.Node) []clusterv1.MachineAddress {
-	if node.Hostname == "" {
-		return nil
+	var out []clusterv1.MachineAddress
+	seen := map[clusterv1.MachineAddress]bool{}
+
+	add := func(addr clusterv1.MachineAddress) {
+		if addr.Address == "" || len(addr.Address) > machineAddressMaxLength || seen[addr] {
+			return
+		}
+		seen[addr] = true
+		out = append(out, addr)
 	}
-	return []clusterv1.MachineAddress{
-		{Type: clusterv1.MachineHostName, Address: node.Hostname},
+
+	add(clusterv1.MachineAddress{Type: clusterv1.MachineHostName, Address: node.Hostname})
+	for _, a := range node.Addresses {
+		typ, ok := clusterAPIAddressTypes[a.Type]
+		if !ok {
+			continue
+		}
+		add(clusterv1.MachineAddress{Type: typ, Address: a.Address})
 	}
+	return out
 }
 
 // SetupWithManager sets up the controller with the Manager.

@@ -46,7 +46,7 @@ AuroraBoot node.
 | Field | Type | Description |
 | --- | --- | --- |
 | `initialization.provisioned` | bool | The Cluster API v1beta2 InfraMachine readiness signal. True once the node is claimed, its cloud-config applied, and it has rejoined `Online`. |
-| `addresses` | `[]clusterv1.MachineAddress` | A single `Hostname` address in v0.1 (see [ARCHITECTURE.md](ARCHITECTURE.md)). |
+| `addresses` | `[]clusterv1.MachineAddress` | The node's hostname, followed by the addresses the node reported to AuroraBoot, in the order it reported them (see [ARCHITECTURE.md](ARCHITECTURE.md)). An agent that reports no addresses leaves only the hostname. |
 | `conditions` | `[]metav1.Condition` | Includes a `Ready` condition; see [QUICKSTART.md](QUICKSTART.md) for the reason values it cycles through. |
 | `failureReason` / `failureMessage` | string | Set only on a terminal, unrecoverable failure: a claimed node that disappears from AuroraBoot entirely. A failed or expired `apply-cloud-config` or `reboot` command is not terminal; it sets a `CloudConfigFailed` or `RebootFailed` `Ready` condition and is retried automatically (see [QUICKSTART.md](QUICKSTART.md)). |
 

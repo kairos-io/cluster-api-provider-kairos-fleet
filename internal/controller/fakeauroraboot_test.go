@@ -54,7 +54,17 @@ type fakeNode struct {
 	Phase         string
 	ClaimKey      *string
 	LastHeartbeat *time.Time
-	commands      []fakeCommand
+	// Addresses are what the node reported to AuroraBoot. The real server stores
+	// the list exactly as it was received and marshals it under "addresses"; a node
+	// that reports none leaves the key out entirely.
+	Addresses []fakeNodeAddress
+	commands  []fakeCommand
+}
+
+// fakeNodeAddress mirrors AuroraBoot's store.NodeAddress.
+type fakeNodeAddress struct {
+	Type    string
+	Address string
 }
 
 type fakeCommand struct {
@@ -250,6 +260,13 @@ func (f *fakeAuroraBoot) nodeDTO(n *fakeNode) map[string]any {
 	}
 	if n.LastHeartbeat != nil {
 		dto["lastHeartbeat"] = n.LastHeartbeat.Format(time.RFC3339Nano)
+	}
+	if len(n.Addresses) > 0 {
+		addrs := make([]map[string]string, 0, len(n.Addresses))
+		for _, a := range n.Addresses {
+			addrs = append(addrs, map[string]string{"type": a.Type, "address": a.Address})
+		}
+		dto["addresses"] = addrs
 	}
 	return dto
 }

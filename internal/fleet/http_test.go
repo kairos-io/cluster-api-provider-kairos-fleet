@@ -233,3 +233,65 @@ func TestRelease_ClaimMismatchClassified(t *testing.T) {
 		t.Errorf("a no-capacity 409 must not read as a claim mismatch")
 	}
 }
+
+func TestGetNode_ParsesReportedAddresses(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"n1","hostname":"h1","phase":"Online",` +
+			`"addresses":[{"type":"InternalIP","address":"10.0.0.7"},` +
+			`{"type":"ExternalIP","address":"203.0.113.9"}]}`))
+	}))
+	defer srv.Close()
+
+	node, err := New(srv.URL, "tok").GetNode(context.Background(), "n1")
+	if err != nil {
+		t.Fatalf("GetNode: %v", err)
+	}
+	want := []NodeAddress{
+		{Type: AddressInternalIP, Address: "10.0.0.7"},
+		{Type: AddressExternalIP, Address: "203.0.113.9"},
+	}
+	if len(node.Addresses) != len(want) {
+		t.Fatalf("addresses = %+v, want %+v", node.Addresses, want)
+	}
+	for i := range want {
+		if node.Addresses[i] != want[i] {
+			t.Errorf("addresses[%d] = %+v, want %+v", i, node.Addresses[i], want[i])
+		}
+	}
+}
+
+func TestClaim_ParsesReportedAddresses(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"n1","hostname":"h1","phase":"Online",` +
+			`"addresses":[{"type":"InternalIP","address":"10.0.0.7"}]}`))
+	}))
+	defer srv.Close()
+
+	node, err := New(srv.URL, "tok").Claim(context.Background(), "grp", "ck")
+	if err != nil {
+		t.Fatalf("Claim: %v", err)
+	}
+	if len(node.Addresses) != 1 || node.Addresses[0].Address != "10.0.0.7" {
+		t.Errorf("addresses = %+v, want one InternalIP 10.0.0.7", node.Addresses)
+	}
+}
+
+// A node that reports no addresses at all must stay valid: the field is optional
+// on the AuroraBoot side and older agents never send it.
+func TestGetNode_NoAddressesIsNotAnError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"n1","hostname":"h1","phase":"Online"}`))
+	}))
+	defer srv.Close()
+
+	node, err := New(srv.URL, "tok").GetNode(context.Background(), "n1")
+	if err != nil {
+		t.Fatalf("GetNode: %v", err)
+	}
+	if node.Addresses != nil {
+		t.Errorf("addresses = %+v, want nil", node.Addresses)
+	}
+}
