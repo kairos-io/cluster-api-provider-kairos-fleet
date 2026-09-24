@@ -186,6 +186,11 @@ func (r *KairosFleetMachineReconciler) reconcileNormal(ctx context.Context, flee
 
 	// 3. Apply the bootstrap cloud-config (once) — passed through unmodified.
 	if fleetMachine.Annotations[cloudConfigAppliedAnnotation] != cloudConfigAppliedValue {
+		if wait := retryWait(fleetMachine, time.Now()); wait > 0 {
+			log.Info("Waiting before queuing a fresh apply-cloud-config after a failed one", "nodeID", nodeID, "retryIn", wait.Round(time.Second))
+			return ctrl.Result{RequeueAfter: wait}, nil
+		}
+		delete(fleetMachine.Annotations, retryNotBeforeAnnotation)
 		data, err := r.bootstrapData(ctx, machine)
 		if err != nil {
 			return ctrl.Result{}, err
@@ -222,6 +227,7 @@ func (r *KairosFleetMachineReconciler) reconcileNormal(ctx context.Context, flee
 			fleetMachine.Status.FailureMessage = nil
 			delete(fleetMachine.Annotations, cloudConfigAppliedAnnotation)
 			delete(fleetMachine.Annotations, cloudConfigCommandIDAnnotation)
+			openRetryWindow(fleetMachine, time.Now(), retryCloudConfigRequeue)
 			log.Info("apply-cloud-config failed; retrying with a fresh command", "nodeID", nodeID)
 			return ctrl.Result{RequeueAfter: retryCloudConfigRequeue}, nil
 		}
@@ -230,6 +236,11 @@ func (r *KairosFleetMachineReconciler) reconcileNormal(ctx context.Context, flee
 			r.notReady(fleetMachine, "ApplyingCloudConfig", "Waiting for the node to write the bootstrap cloud-config")
 			return ctrl.Result{RequeueAfter: waitForRejoinRequeue}, nil
 		}
+		if wait := retryWait(fleetMachine, time.Now()); wait > 0 {
+			log.Info("Waiting before queuing a fresh reboot after a failed one", "nodeID", nodeID, "retryIn", wait.Round(time.Second))
+			return ctrl.Result{RequeueAfter: wait}, nil
+		}
+		delete(fleetMachine.Annotations, retryNotBeforeAnnotation)
 		cmd, err := fc.Reboot(ctx, nodeID)
 		if err != nil {
 			return ctrl.Result{}, fmt.Errorf("rebooting node %s: %w", nodeID, err)
@@ -276,6 +287,7 @@ func (r *KairosFleetMachineReconciler) reconcileNormal(ctx context.Context, flee
 			r.notReady(fleetMachine, "RebootFailed", fmt.Sprintf("reboot failed on node %s: %s", nodeID, failMsg))
 			delete(fleetMachine.Annotations, rebootRequestedAtAnnotation)
 			delete(fleetMachine.Annotations, rebootCommandIDAnnotation)
+			openRetryWindow(fleetMachine, time.Now(), retryRebootRequeue)
 			log.Info("Reboot failed; retrying with a fresh command", "nodeID", nodeID, "result", failMsg)
 			return ctrl.Result{RequeueAfter: retryRebootRequeue}, nil
 		}
@@ -342,6 +354,33 @@ func (r *KairosFleetMachineReconciler) rebootFailed(ctx context.Context, fc flee
 	}
 	_, failed, failMsg := r.commandState(ctx, fc, nodeID, fleetMachine.Annotations[rebootCommandIDAnnotation], fleet.CommandReboot)
 	return failed, failMsg
+}
+
+// openRetryWindow records when a fresh command may next be queued, after the
+// node reported the previous one failed. See retryNotBeforeAnnotation for why
+// this cannot be a RequeueAfter alone.
+func openRetryWindow(fleetMachine *infrav1.KairosFleetMachine, now time.Time, after time.Duration) {
+	annotations.AddAnnotations(fleetMachine, map[string]string{
+		retryNotBeforeAnnotation: now.Add(after).UTC().Format(time.RFC3339),
+	})
+}
+
+// retryWait reports how long the controller must still wait before queuing a
+// fresh command, or zero when no retry window is open. An unparseable value is
+// treated as expired rather than holding the machine forever.
+func retryWait(fleetMachine *infrav1.KairosFleetMachine, now time.Time) time.Duration {
+	v := fleetMachine.Annotations[retryNotBeforeAnnotation]
+	if v == "" {
+		return 0
+	}
+	notBefore, err := time.Parse(time.RFC3339, v)
+	if err != nil {
+		return 0
+	}
+	if wait := notBefore.Sub(now); wait > 0 {
+		return wait
+	}
+	return 0
 }
 
 // rejoinedAfterReboot reports whether the node has come back Online after the reboot

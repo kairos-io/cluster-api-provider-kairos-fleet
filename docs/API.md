@@ -61,6 +61,7 @@ These are set by the controller, not the user:
 | `kairos-fleet.infrastructure.cluster.x-k8s.io/cloud-config-command-id` | The ID of the apply-cloud-config command the controller queued. Its outcome is read back from this exact command, not the first apply-cloud-config found for the node: AuroraBoot never prunes a node's command history, so an earlier failed attempt would otherwise shadow every later success. Cleared alongside `cloud-config-applied` on a `Failed` or `Expired` outcome. |
 | `kairos-fleet.infrastructure.cluster.x-k8s.io/reboot-requested-at` | RFC 3339 timestamp of the reboot the controller requested to apply the staged config; used to detect rejoin. Cleared, with `reboot-command-id`, if that reboot reports `Failed` or `Expired`, so a fresh one is issued. |
 | `kairos-fleet.infrastructure.cluster.x-k8s.io/reboot-command-id` | The ID of the reboot command the controller queued, so its outcome is read back from that exact command and an earlier failed reboot of the same node cannot shadow it. Same reasoning as `cloud-config-command-id`. |
+| `kairos-fleet.infrastructure.cluster.x-k8s.io/retry-not-before` | RFC 3339 timestamp before which the controller will not queue a fresh `apply-cloud-config` or `reboot` after the node reported the previous one `Failed` or `Expired`. It paces those retries to about once a minute. It has to be recorded on the object, because clearing the command markers to allow the retry triggers an immediate reconcile. Removed when the fresh command is queued. |
 
 ## KairosFleetClusterTemplate
 

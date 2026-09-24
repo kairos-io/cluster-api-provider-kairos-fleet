@@ -446,6 +446,20 @@ func TestCommandState_WithoutACommandIDFiltersByKind(t *testing.T) {
 // and the controller has to issue a fresh command on its own. Marking the machine
 // terminally failed, or requeueing without clearing the applied markers, both leave
 // it stuck forever.
+// expireRetryWindow moves the recorded retry time into the past, standing in for
+// the pacing interval elapsing. It also asserts that a window was opened.
+func expireRetryWindow(t *testing.T, c client.Client) {
+	t.Helper()
+	kfm := getKFM(t, c)
+	if kfm.Annotations[retryNotBeforeAnnotation] == "" {
+		t.Fatalf("expected a failed command to open a retry window, annotations: %v", kfm.Annotations)
+	}
+	kfm.Annotations[retryNotBeforeAnnotation] = time.Now().Add(-time.Second).UTC().Format(time.RFC3339)
+	if err := c.Update(context.Background(), kfm); err != nil {
+		t.Fatalf("expiring the retry window: %v", err)
+	}
+}
+
 func TestMachineReconcile_RetriesAFailedApply(t *testing.T) {
 	failing := true
 	fc := &fleet.FakeClient{
@@ -483,8 +497,23 @@ func TestMachineReconcile_RetriesAFailedApply(t *testing.T) {
 		t.Fatalf("the claim must be kept across a retry, got %q", kfm.Annotations[infrav1.NodeIDAnnotation])
 	}
 
-	// The operator fixes the node; the next pass queues a second apply and moves on.
+	// Clearing the markers is an update, and the watch answers it with an
+	// immediate reconcile. Those passes must hold, not queue another command: a
+	// node that refuses at once was otherwise sent a fresh one on every pass.
+	for range 3 {
+		res = reconcileKFM(t, r)
+		if len(fc.Applies) != 1 {
+			t.Fatalf("an immediate re-reconcile must not queue another apply-cloud-config inside the retry window, got %d", len(fc.Applies))
+		}
+		if res.RequeueAfter <= 0 || res.RequeueAfter > retryCloudConfigRequeue {
+			t.Fatalf("a held retry must come back when the window closes, got RequeueAfter=%v", res.RequeueAfter)
+		}
+	}
+
+	// The operator fixes the node and the window passes; the next pass queues a
+	// second apply and moves on.
 	failing = false
+	expireRetryWindow(t, c)
 	reconcileKFM(t, r) // apply (2nd)
 	if len(fc.Applies) != 2 {
 		t.Fatalf("expected a second apply-cloud-config after the retry, got %d", len(fc.Applies))
@@ -658,9 +687,22 @@ func TestMachineReconcile_RetriesARejectedReboot(t *testing.T) {
 		t.Fatalf("expected the node's rejection on the Ready condition, got %+v", ready)
 	}
 
-	// The operator fixes the policy; the next pass queues a second reboot and the
-	// node rejoins.
+	// As for apply-cloud-config: the immediate reconciles that follow the marker
+	// change must hold rather than reboot the node again on every pass.
+	for range 3 {
+		res = reconcileKFM(t, r)
+		if len(fc.Reboots) != 1 {
+			t.Fatalf("an immediate re-reconcile must not queue another reboot inside the retry window, got %+v", fc.Reboots)
+		}
+		if res.RequeueAfter <= 0 || res.RequeueAfter > retryRebootRequeue {
+			t.Fatalf("a held retry must come back when the window closes, got RequeueAfter=%v", res.RequeueAfter)
+		}
+	}
+
+	// The operator fixes the policy and the window passes; the next pass queues a
+	// second reboot and the node rejoins.
 	rebootRejected = false
+	expireRetryWindow(t, c)
 	reconcileKFM(t, r) // reboot (2nd)
 	if len(fc.Reboots) != 2 {
 		t.Fatalf("expected a second reboot after the retry, got %+v", fc.Reboots)

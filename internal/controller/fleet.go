@@ -61,6 +61,15 @@ const (
 	// cloudConfigCommandIDAnnotation.
 	rebootCommandIDAnnotation = "kairos-fleet.infrastructure.cluster.x-k8s.io/reboot-command-id"
 
+	// retryNotBeforeAnnotation records (RFC3339) the earliest time the controller
+	// may queue a fresh apply-cloud-config or reboot after the node reported the
+	// previous one failed. The pacing has to live on the object: clearing the
+	// command markers to allow the retry is itself an update, and the watch on
+	// KairosFleetMachine answers it with an immediate reconcile, so a RequeueAfter
+	// alone never delayed anything. A node that refused a command at once was sent
+	// a new one on every pass.
+	retryNotBeforeAnnotation = "kairos-fleet.infrastructure.cluster.x-k8s.io/retry-not-before"
+
 	// providerIDPrefix is the scheme for KairosFleetMachine provider IDs. The node
 	// identifier is the AuroraBoot node ID (see ADR 0001 §3).
 	providerIDPrefix = "kairos-fleet://"
