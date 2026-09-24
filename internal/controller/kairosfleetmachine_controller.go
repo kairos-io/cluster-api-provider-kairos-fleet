@@ -149,7 +149,7 @@ func (r *KairosFleetMachineReconciler) reconcileNormal(ctx context.Context, flee
 		return res, err
 	}
 
-	claimKey := string(fleetMachine.UID)
+	claimKey := claimKeyFor(fleetMachine)
 
 	// 2. Claim a node from the group (idempotent on claimKey).
 	nodeID := fleetMachine.Annotations[infrav1.NodeIDAnnotation]
@@ -175,7 +175,10 @@ func (r *KairosFleetMachineReconciler) reconcileNormal(ctx context.Context, flee
 			}
 			return ctrl.Result{}, fmt.Errorf("claiming node from group %q: %w", fleetMachine.Spec.Group, err)
 		}
-		annotations.AddAnnotations(fleetMachine, map[string]string{infrav1.NodeIDAnnotation: node.ID})
+		annotations.AddAnnotations(fleetMachine, map[string]string{
+			infrav1.NodeIDAnnotation: node.ID,
+			claimKeyAnnotation:       claimKey,
+		})
 		log.Info("Claimed AuroraBoot node", "nodeID", node.ID, "group", fleetMachine.Spec.Group)
 		r.notReady(fleetMachine, "NodeClaimed", "Claimed an AuroraBoot node; applying bootstrap configuration")
 		// Return without an explicit requeue: the deferred patch persists the node-id
@@ -332,11 +335,27 @@ func (r *KairosFleetMachineReconciler) reconcileDelete(ctx context.Context, flee
 			// while the machine sits in Terminating; log and let deletion proceed.
 			log.Info("Cannot resolve AuroraBoot connection on delete; removing finalizer without release", "err", err.Error())
 		default:
-			claimKey := string(fleetMachine.UID)
-			if _, err := fc.Release(ctx, nodeID, claimKey); err != nil && !fleet.IsNotFound(err) {
+			claimKey := claimKeyFor(fleetMachine)
+			_, err := fc.Release(ctx, nodeID, claimKey)
+			switch {
+			case err == nil:
+				log.Info("Released AuroraBoot node", "nodeID", nodeID)
+			case fleet.IsNotFound(err):
+				log.Info("AuroraBoot node is already gone; nothing to release", "nodeID", nodeID)
+			case fleet.IsClaimMismatch(err):
+				// The node is held under a different key, so this machine can never
+				// release it, and retrying would only keep the finalizer forever.
+				// Either another machine claimed the node after it was released out
+				// of band, or this machine was claimed before its key was recorded
+				// and has since been moved to a new UID. Let deletion finish, and say
+				// which node so an operator can return it to its group if nothing
+				// else owns it.
+				log.Info("AuroraBoot node is claimed by a different key; removing the finalizer without a release. "+
+					"If no other machine owns the node, release it in AuroraBoot to return it to its group",
+					"nodeID", nodeID, "claimKey", claimKey)
+			default:
 				return fmt.Errorf("releasing node %s: %w", nodeID, err)
 			}
-			log.Info("Released AuroraBoot node", "nodeID", nodeID)
 		}
 	}
 
@@ -381,6 +400,17 @@ func retryWait(fleetMachine *infrav1.KairosFleetMachine, now time.Time) time.Dur
 		return wait
 	}
 	return 0
+}
+
+// claimKeyFor returns the key this machine claims and releases its node with:
+// the one recorded at claim time when there is one, otherwise the object's UID,
+// which is the key a first claim uses and the one a machine claimed by an earlier
+// build was claimed with.
+func claimKeyFor(fleetMachine *infrav1.KairosFleetMachine) string {
+	if key := fleetMachine.Annotations[claimKeyAnnotation]; key != "" {
+		return key
+	}
+	return string(fleetMachine.UID)
 }
 
 // rejoinedAfterReboot reports whether the node has come back Online after the reboot

@@ -110,6 +110,13 @@ func IsNotFound(err error) bool {
 	return errors.As(err, &e) && e.StatusCode == http.StatusNotFound
 }
 
+// IsClaimMismatch reports whether err is a release refused because the node is
+// claimed by a different key (server code "ClaimMismatch", HTTP 409).
+func IsClaimMismatch(err error) bool {
+	var e *APIError
+	return errors.As(err, &e) && e.Code == "ClaimMismatch"
+}
+
 // IsConflict reports whether err is an APIError with a 409 status.
 func IsConflict(err error) bool {
 	var e *APIError

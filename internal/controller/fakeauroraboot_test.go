@@ -220,14 +220,21 @@ func (f *fakeAuroraBoot) handleRelease(w http.ResponseWriter, r *http.Request, i
 		http.Error(w, `{"error":"not found"}`, http.StatusNotFound)
 		return
 	}
-	released := false
-	if n.ClaimKey != nil && *n.ClaimKey == body.ClaimKey {
-		f.released[id] = body.ClaimKey
-		delete(f.byClaim, body.ClaimKey)
-		n.ClaimKey = nil
-		released = true
+	// Mirrors AuroraBoot's NodeHandler.Release: an unclaimed node is a no-op, and a
+	// node claimed by a different key is refused with 409 ClaimMismatch rather
+	// than answered with released=false, which hid that case from the tests.
+	if n.ClaimKey == nil {
+		writeJSON(w, http.StatusOK, map[string]bool{"released": false})
+		return
 	}
-	writeJSON(w, http.StatusOK, map[string]bool{"released": released})
+	if *n.ClaimKey != body.ClaimKey {
+		writeJSON(w, http.StatusConflict, map[string]string{"error": "node is claimed by a different key", "code": "ClaimMismatch"})
+		return
+	}
+	f.released[id] = body.ClaimKey
+	delete(f.byClaim, body.ClaimKey)
+	n.ClaimKey = nil
+	writeJSON(w, http.StatusOK, map[string]bool{"released": true})
 }
 
 func (f *fakeAuroraBoot) nodeDTO(n *fakeNode) map[string]any {

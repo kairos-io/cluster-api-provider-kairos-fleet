@@ -57,6 +57,12 @@ func NoCapacityError() error {
 	return &APIError{StatusCode: http.StatusConflict, ErrorMsg: "no capacity", Code: "NoCapacity"}
 }
 
+// ClaimMismatchError returns an error that satisfies IsClaimMismatch, as
+// AuroraBoot answers a release whose key does not match the node's claim.
+func ClaimMismatchError() error {
+	return &APIError{StatusCode: http.StatusConflict, ErrorMsg: "node is claimed by a different key", Code: "ClaimMismatch"}
+}
+
 // NotFoundError returns an error that satisfies IsNotFound, for tests.
 func NotFoundError() error {
 	return &APIError{StatusCode: http.StatusNotFound, ErrorMsg: "not found"}

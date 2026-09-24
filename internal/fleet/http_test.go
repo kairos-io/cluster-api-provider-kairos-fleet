@@ -208,3 +208,28 @@ func TestGetCommands_ParsesCreatedAt(t *testing.T) {
 		t.Errorf("c2 (%v) should be newer than c1 (%v)", cmds[1].CreatedAt, cmds[0].CreatedAt)
 	}
 }
+
+// AuroraBoot refuses a release whose key does not match the node's claim with 409
+// and code "ClaimMismatch". A no-capacity claim is also a 409, so the two must be
+// told apart by the code, not by the status.
+func TestRelease_ClaimMismatchClassified(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusConflict)
+		_, _ = w.Write([]byte(`{"error":"node is claimed by a different key","code":"ClaimMismatch"}`))
+	}))
+	defer srv.Close()
+
+	_, err := New(srv.URL, "tok").Release(context.Background(), "node-1", "old-key")
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !IsClaimMismatch(err) {
+		t.Errorf("IsClaimMismatch(%v) = false, want true", err)
+	}
+	if IsNoCapacity(err) {
+		t.Errorf("a claim mismatch must not read as no capacity")
+	}
+	if IsClaimMismatch(NoCapacityError()) {
+		t.Errorf("a no-capacity 409 must not read as a claim mismatch")
+	}
+}

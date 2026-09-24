@@ -18,6 +18,7 @@ package controller
 
 import (
 	"context"
+	"net/http"
 	"strings"
 	"testing"
 	"time"
@@ -863,5 +864,86 @@ func TestMachineReconcile_DoesNotRetryARebootWhileTheNodeIsAway(t *testing.T) {
 	}
 	if len(fc.Reboots) != 1 {
 		t.Fatalf("expected still exactly one reboot after the node rejoined, got %+v", fc.Reboots)
+	}
+}
+
+// The claim key is recorded when the node is claimed, so the release can present
+// it even after the object's UID has changed.
+func TestMachineReconcile_RecordsTheClaimKey(t *testing.T) {
+	fc := &fleet.FakeClient{
+		ClaimFunc: func(_ context.Context, _, _ string) (*fleet.Node, error) {
+			return &fleet.Node{ID: testNodeID, Hostname: testHostname, Phase: fleet.PhaseOnline}, nil
+		},
+	}
+	r, c := newReconciler(t, fc, testFixture(true))
+
+	reconcileKFM(t, r) // claim
+	if got := getKFM(t, c).Annotations[claimKeyAnnotation]; got != "kfm-uid" {
+		t.Fatalf("claim-key annotation = %q, want the UID the node was claimed with (kfm-uid)", got)
+	}
+}
+
+// clusterctl move and a backup and restore recreate the object with a new UID.
+// The node is still claimed under the original key, and AuroraBoot refuses a
+// release with any other key, so the release must use the recorded one: with the
+// current UID the delete retried a 409 forever and kept its finalizer.
+func TestMachineReconcile_ReleasesWithTheRecordedKeyAfterAMove(t *testing.T) {
+	fc := &fleet.FakeClient{
+		ReleaseFunc: func(_ context.Context, _, claimKey string) (bool, error) {
+			if claimKey != "uid-before-the-move" {
+				return false, fleet.ClaimMismatchError()
+			}
+			return true, nil
+		},
+	}
+	objs := deletingFixture()
+	for _, o := range objs {
+		if kfm, ok := o.(*infrav1.KairosFleetMachine); ok {
+			// The object now has a different UID (kfm-uid) from the one it claimed with.
+			kfm.Annotations[claimKeyAnnotation] = "uid-before-the-move"
+		}
+	}
+	r, c := newReconciler(t, fc, objs)
+
+	reconcileKFM(t, r)
+	if len(fc.Releases) != 1 || fc.Releases[0].ClaimKey != "uid-before-the-move" {
+		t.Fatalf("expected the release to use the recorded claim key, got %+v", fc.Releases)
+	}
+	assertKFMGone(t, c)
+}
+
+// A node held under a different key can never be released by this machine:
+// another machine claimed it after it was released out of band, or this machine
+// was claimed before its key was recorded and has since moved. Retrying cannot
+// succeed, so deletion must finish instead of keeping the finalizer forever.
+func TestMachineReconcile_FinishesDeletingWhenTheNodeIsClaimedByAnotherKey(t *testing.T) {
+	fc := &fleet.FakeClient{
+		ReleaseFunc: func(_ context.Context, _, _ string) (bool, error) {
+			return false, fleet.ClaimMismatchError()
+		},
+	}
+	r, c := newReconciler(t, fc, deletingFixture())
+
+	reconcileKFM(t, r)
+	assertKFMGone(t, c)
+}
+
+// Any other release failure may be transient, so it keeps the finalizer and is
+// retried: giving up would leak the node's claim.
+func TestMachineReconcile_KeepsTheFinalizerWhenReleaseFails(t *testing.T) {
+	fc := &fleet.FakeClient{
+		ReleaseFunc: func(_ context.Context, _, _ string) (bool, error) {
+			return false, &fleet.APIError{StatusCode: http.StatusInternalServerError, ErrorMsg: "failed to release node"}
+		},
+	}
+	r, c := newReconciler(t, fc, deletingFixture())
+
+	if _, err := r.Reconcile(context.Background(), ctrl.Request{
+		NamespacedName: types.NamespacedName{Namespace: testNS, Name: "kfm"},
+	}); err == nil {
+		t.Fatal("expected the release failure to surface so the delete is retried")
+	}
+	if !controllerutil.ContainsFinalizer(getKFM(t, c), infrav1.KairosFleetMachineFinalizer) {
+		t.Fatal("expected the finalizer to be kept so the claim is not leaked")
 	}
 }

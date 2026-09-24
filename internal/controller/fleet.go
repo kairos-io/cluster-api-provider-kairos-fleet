@@ -70,6 +70,15 @@ const (
 	// a new one on every pass.
 	retryNotBeforeAnnotation = "kairos-fleet.infrastructure.cluster.x-k8s.io/retry-not-before"
 
+	// claimKeyAnnotation records the key the node was claimed with, so the release
+	// presents the same key. The key is the KairosFleetMachine's UID at claim
+	// time, and a UID does not survive clusterctl move or a backup and restore,
+	// both of which recreate the object with a new one. A release with the new
+	// UID no longer matches, AuroraBoot refuses it with 409 ClaimMismatch, and a
+	// delete that retried that forever kept the finalizer and blocked scale-down
+	// and Cluster deletion.
+	claimKeyAnnotation = "kairos-fleet.infrastructure.cluster.x-k8s.io/claim-key"
+
 	// providerIDPrefix is the scheme for KairosFleetMachine provider IDs. The node
 	// identifier is the AuroraBoot node ID (see ADR 0001 §3).
 	providerIDPrefix = "kairos-fleet://"
