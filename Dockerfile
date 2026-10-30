@@ -6,7 +6,7 @@
 # module fine, and the directive cannot be raised past what golangci-lint is
 # built with (it refuses to load a module targeting a newer Go than itself).
 # Bump the digest via renovate/dependabot.
-FROM golang:1.27-bookworm@sha256:648f440f42a0958804efb24df176f806f9d353b41f1c0627f666428e40310f6b AS builder
+FROM golang:1.27-bookworm@sha256:d9b6a1beb9474adc2a1ce842573639b44b2a0dd49b6669f51d3821baf9ec37c9 AS builder
 ARG TARGETOS
 ARG TARGETARCH
 ARG VERSION=dev
