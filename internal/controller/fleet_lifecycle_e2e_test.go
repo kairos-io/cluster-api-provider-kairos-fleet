@@ -21,6 +21,7 @@ import (
 	"testing"
 
 	"k8s.io/utils/ptr"
+	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta2"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
@@ -38,7 +39,14 @@ import (
 func TestFleetLifecycle_E2E(t *testing.T) {
 	// One claimable node in the target group.
 	ab := newFakeAuroraBoot(map[string][]fakeNode{
-		"workers": {{ID: "node-e2e-1", MachineID: "mid-e2e", Hostname: "worker-e2e"}},
+		"workers": {{ID: "node-e2e-1", MachineID: "mid-e2e", Hostname: "worker-e2e",
+			Addresses: []fakeNodeAddress{
+				{Type: "InternalIP", Address: "10.0.0.7"},
+				// A type outside Cluster API's enum: AuroraBoot passes whatever the
+				// agent reports, and the apiserver would reject the status update
+				// if the provider did the same.
+				{Type: "LinkLocalIP", Address: "169.254.0.1"},
+			}}},
 	})
 	defer ab.Close()
 
@@ -74,8 +82,20 @@ func TestFleetLifecycle_E2E(t *testing.T) {
 	if got := ptr.Deref(kfm.Spec.ProviderID, ""); got != providerIDPrefix+"node-e2e-1" {
 		t.Fatalf("providerID = %q, want %snode-e2e-1", got, providerIDPrefix)
 	}
-	if len(kfm.Status.Addresses) != 1 || kfm.Status.Addresses[0].Address != "worker-e2e" {
-		t.Fatalf("addresses = %+v, want one Hostname worker-e2e", kfm.Status.Addresses)
+	// The addresses the node reported to AuroraBoot reach status.addresses through
+	// the real HTTP client, led by the hostname; the type Cluster API does not
+	// define is dropped rather than passed through.
+	wantAddrs := []clusterv1.MachineAddress{
+		{Type: clusterv1.MachineHostName, Address: "worker-e2e"},
+		{Type: clusterv1.MachineInternalIP, Address: "10.0.0.7"},
+	}
+	if len(kfm.Status.Addresses) != len(wantAddrs) {
+		t.Fatalf("addresses = %+v, want %+v", kfm.Status.Addresses, wantAddrs)
+	}
+	for i := range wantAddrs {
+		if kfm.Status.Addresses[i] != wantAddrs[i] {
+			t.Fatalf("addresses[%d] = %+v, want %+v", i, kfm.Status.Addresses[i], wantAddrs[i])
+		}
 	}
 
 	// The real client drove the AuroraBoot lifecycle: the bootstrap cloud-config was

@@ -255,17 +255,24 @@ func decodeError(resp *http.Response) error {
 
 // nodeDTO mirrors the AuroraBoot /api/v1/nodes JSON shape.
 type nodeDTO struct {
-	ID            string     `json:"id"`
-	MachineID     string     `json:"machineID"`
-	Hostname      string     `json:"hostname"`
-	GroupID       string     `json:"groupID,omitempty"`
-	Phase         string     `json:"phase"`
-	ClaimKey      *string    `json:"claimKey,omitempty"`
-	LastHeartbeat *time.Time `json:"lastHeartbeat,omitempty"`
+	ID            string       `json:"id"`
+	MachineID     string       `json:"machineID"`
+	Hostname      string       `json:"hostname"`
+	GroupID       string       `json:"groupID,omitempty"`
+	Phase         string       `json:"phase"`
+	ClaimKey      *string      `json:"claimKey,omitempty"`
+	LastHeartbeat *time.Time   `json:"lastHeartbeat,omitempty"`
+	Addresses     []addressDTO `json:"addresses,omitempty"`
+}
+
+// addressDTO mirrors AuroraBoot's store.NodeAddress.
+type addressDTO struct {
+	Type    string `json:"type"`
+	Address string `json:"address"`
 }
 
 func (d *nodeDTO) toNode() *Node {
-	return &Node{
+	n := &Node{
 		ID:            d.ID,
 		MachineID:     d.MachineID,
 		Hostname:      d.Hostname,
@@ -274,6 +281,10 @@ func (d *nodeDTO) toNode() *Node {
 		ClaimKey:      d.ClaimKey,
 		LastHeartbeat: d.LastHeartbeat,
 	}
+	for _, a := range d.Addresses {
+		n.Addresses = append(n.Addresses, NodeAddress(a))
+	}
+	return n
 }
 
 // commandDTO mirrors the AuroraBoot NodeCommand JSON shape.
