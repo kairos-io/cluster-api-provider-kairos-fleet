@@ -143,10 +143,13 @@ func (r *KairosFleetMachineReconciler) reconcileNormal(ctx context.Context, flee
 		return ctrl.Result{}, nil
 	}
 
-	fc, res, err := r.fleetClientFor(ctx, cluster)
-	if err != nil || fc == nil {
-		r.notReady(fleetMachine, "WaitingForClusterInfrastructure", "Waiting for a valid AuroraBoot connection on the KairosFleetCluster")
-		return res, err
+	fc, notReady, err := r.fleetClientFor(ctx, cluster)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+	if notReady != nil {
+		r.notReady(fleetMachine, notReady.reason, notReady.message)
+		return ctrl.Result{RequeueAfter: notReady.requeueAfter}, nil
 	}
 
 	claimKey := claimKeyFor(fleetMachine)
@@ -486,19 +489,82 @@ func newerCommand(a, b *fleet.Command) bool {
 	return a.CreatedAt.After(*b.CreatedAt)
 }
 
-// fleetClientFor resolves a fleet.Client from the cluster's KairosFleetCluster. It
-// returns (nil, requeue-result, nil) when the InfraCluster is not yet available.
-func (r *KairosFleetMachineReconciler) fleetClientFor(ctx context.Context, cluster *clusterv1.Cluster) (fleet.Client, ctrl.Result, error) {
+// connectionNotReady is why a normal reconcile could not resolve an AuroraBoot
+// client, in the form the KairosFleetMachine publishes it: the Ready condition
+// reason, the message that names the cause, and how long to wait before looking
+// again. It is nil when the client resolved.
+type connectionNotReady struct {
+	reason       string
+	message      string
+	requeueAfter time.Duration
+}
+
+const (
+	// reasonWaitingForClusterInfrastructure is the wait for the InfraCluster to
+	// appear, or for an API read of it to stop failing. Time alone can end it.
+	reasonWaitingForClusterInfrastructure = "WaitingForClusterInfrastructure"
+
+	// reasonWaitingForAuroraBootSecret is the wait for the admin-token Secret the
+	// KairosFleetCluster names. It does not exist yet, and creating it is enough.
+	reasonWaitingForAuroraBootSecret = "WaitingForAuroraBootSecret"
+
+	// reasonAuroraBootConnectionIncomplete is a connection that cannot be resolved
+	// as written: no auroraboot.url, or an admin-token Secret that carries no
+	// token. Waiting never ends it; the KairosFleetCluster has to be edited.
+	reasonAuroraBootConnectionIncomplete = "AuroraBootConnectionIncomplete"
+)
+
+// fleetClientFor resolves a fleet.Client from the cluster's KairosFleetCluster.
+//
+// It returns (nil, why, nil) when the connection is not usable, where why carries
+// resolveFleetClient's message verbatim. Each cause is a different thing in the
+// operator's hands - a typo in auroraboot.url, a Secret that is not created yet, a
+// Secret whose key is misspelt - and reporting them all as one "waiting" reason
+// leaves a permanently broken cluster indistinguishable from one still coming up.
+// An error is returned only for an API read failure the caller should surface.
+func (r *KairosFleetMachineReconciler) fleetClientFor(ctx context.Context, cluster *clusterv1.Cluster) (fleet.Client, *connectionNotReady, error) {
+	log := logf.FromContext(ctx)
+
 	fleetCluster := &infrav1.KairosFleetCluster{}
 	key := types.NamespacedName{Namespace: cluster.Namespace, Name: cluster.Spec.InfrastructureRef.Name}
 	if err := r.Get(ctx, key, fleetCluster); err != nil {
-		return nil, ctrl.Result{RequeueAfter: waitForRejoinRequeue}, client.IgnoreNotFound(err)
+		if !apierrors.IsNotFound(err) {
+			return nil, nil, fmt.Errorf("getting KairosFleetCluster %s: %w", key, err)
+		}
+		log.Info("AuroraBoot connection not ready", "reason", err.Error())
+		return nil, &connectionNotReady{
+			reason:       reasonWaitingForClusterInfrastructure,
+			message:      fmt.Sprintf("Waiting for KairosFleetCluster %s to exist", key),
+			requeueAfter: waitForRejoinRequeue,
+		}, nil
 	}
+
 	fc, err := resolveFleetClient(ctx, r.Client, r.fleetFactory(), fleetCluster)
 	if err != nil {
-		return nil, ctrl.Result{RequeueAfter: waitForCapacityRequeue}, nil
+		log.Info("AuroraBoot connection not ready", "reason", err.Error())
+		return nil, &connectionNotReady{
+			reason:       connectionNotReadyReason(err),
+			message:      err.Error(),
+			requeueAfter: waitForCapacityRequeue,
+		}, nil
 	}
-	return fc, ctrl.Result{}, nil
+	return fc, nil, nil
+}
+
+// connectionNotReadyReason classifies a resolveFleetClient failure into the reason
+// the KairosFleetMachine publishes. It splits isPermanentlyUnresolvable's two arms:
+// on delete both mean "stop waiting", but here a Secret that does not exist yet is
+// a wait the operator ends by creating it, while errConnectionIncomplete needs the
+// KairosFleetCluster itself changed.
+func connectionNotReadyReason(err error) string {
+	switch {
+	case errors.Is(err, errConnectionIncomplete):
+		return reasonAuroraBootConnectionIncomplete
+	case apierrors.IsNotFound(err):
+		return reasonWaitingForAuroraBootSecret
+	default:
+		return reasonWaitingForClusterInfrastructure
+	}
 }
 
 // fleetClientForDelete resolves a fleet.Client for the release-on-delete path. It

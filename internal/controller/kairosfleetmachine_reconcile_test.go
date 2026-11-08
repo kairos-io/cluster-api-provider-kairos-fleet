@@ -947,3 +947,182 @@ func TestMachineReconcile_KeepsTheFinalizerWhenReleaseFails(t *testing.T) {
 		t.Fatal("expected the finalizer to be kept so the claim is not leaked")
 	}
 }
+
+// runningFixture is testFixture with bootstrap ready, minus the named objects, so a
+// normal (non-deleting) reconcile reaches the AuroraBoot connection resolution with
+// one piece of it missing.
+func runningFixture(drop ...string) []client.Object {
+	dropped := map[string]bool{}
+	for _, name := range drop {
+		dropped[name] = true
+	}
+	kept := []client.Object{}
+	for _, o := range testFixture(true) {
+		if dropped[o.GetName()] {
+			continue
+		}
+		kept = append(kept, o)
+	}
+	return kept
+}
+
+// assertNotReady reads the Ready condition an unusable connection left behind. It
+// also pins that the machine is not marked terminally failed: every cause here is
+// something the operator fixes by editing the KairosFleetCluster or its Secret, and
+// a failureReason would have CAPI remediate a machine that is fine.
+func assertNotReady(t *testing.T, c client.Client, wantReason string, wantInMessage string) {
+	t.Helper()
+	kfm := getKFM(t, c)
+	cond := meta.FindStatusCondition(kfm.Status.Conditions, clusterv1.ReadyCondition)
+	if cond == nil {
+		t.Fatalf("expected a Ready condition")
+	}
+	if cond.Status != metav1.ConditionFalse {
+		t.Fatalf("expected Ready=False, got %s", cond.Status)
+	}
+	if cond.Reason != wantReason {
+		t.Fatalf("expected reason %q, got %q (message %q)", wantReason, cond.Reason, cond.Message)
+	}
+	if !strings.Contains(cond.Message, wantInMessage) {
+		t.Fatalf("expected the message to name the cause %q, got %q", wantInMessage, cond.Message)
+	}
+	if ptr.Deref(kfm.Status.Initialization.Provisioned, false) {
+		t.Fatalf("expected not provisioned while the connection is unusable")
+	}
+	if kfm.Status.FailureReason != nil || kfm.Status.FailureMessage != nil {
+		t.Fatalf("expected no terminal failure, got reason=%v message=%v",
+			kfm.Status.FailureReason, kfm.Status.FailureMessage)
+	}
+}
+
+// A KairosFleetCluster with no auroraboot.url can never resolve, no matter how long
+// the machine waits. The operator has to edit the KairosFleetCluster, so the reason
+// says so and the message names the field.
+func TestMachineReconcile_NamesAConnectionWithNoURL(t *testing.T) {
+	objs := runningFixture()
+	for _, o := range objs {
+		if fc, ok := o.(*infrav1.KairosFleetCluster); ok {
+			fc.Spec.AuroraBoot.URL = ""
+		}
+	}
+	r, c := newReconciler(t, &fleet.FakeClient{}, objs)
+
+	res := reconcileKFM(t, r)
+	if res.RequeueAfter != waitForCapacityRequeue {
+		t.Fatalf("expected a %s requeue, got %s", waitForCapacityRequeue, res.RequeueAfter)
+	}
+	assertNotReady(t, c, reasonAuroraBootConnectionIncomplete, "has no auroraboot.url")
+}
+
+// The same for an admin-token Secret that exists but carries the token under some
+// other key: a misspelt key reads as an empty token and never fixes itself.
+func TestMachineReconcile_NamesAnAdminTokenSecretWithNoTokenKey(t *testing.T) {
+	objs := runningFixture()
+	for _, o := range objs {
+		if s, ok := o.(*corev1.Secret); ok && s.Name == "ab-token" {
+			s.Data = map[string][]byte{"admin-token": []byte("s3cret")}
+		}
+	}
+	r, c := newReconciler(t, &fleet.FakeClient{}, objs)
+
+	reconcileKFM(t, r)
+	assertNotReady(t, c, reasonAuroraBootConnectionIncomplete, `has no "token" key`)
+}
+
+// A Secret that does not exist yet is a different thing from one that is wrong: the
+// operator ends this wait by creating it, so it keeps a waiting reason of its own
+// rather than being folded into the incomplete-connection one.
+func TestMachineReconcile_WaitsForAnAdminTokenSecretThatIsNotCreatedYet(t *testing.T) {
+	r, c := newReconciler(t, &fleet.FakeClient{}, runningFixture("ab-token"))
+
+	res := reconcileKFM(t, r)
+	if res.RequeueAfter != waitForCapacityRequeue {
+		t.Fatalf("expected a %s requeue, got %s", waitForCapacityRequeue, res.RequeueAfter)
+	}
+	assertNotReady(t, c, reasonWaitingForAuroraBootSecret, "ab-token")
+}
+
+// The InfraCluster itself can lag the Cluster on a fresh create. That is the one
+// case the old single reason was actually right about, and it keeps it.
+func TestMachineReconcile_WaitsForTheInfraClusterToExist(t *testing.T) {
+	r, c := newReconciler(t, &fleet.FakeClient{}, runningFixture("fc"))
+
+	res := reconcileKFM(t, r)
+	if res.RequeueAfter != waitForRejoinRequeue {
+		t.Fatalf("expected a %s requeue, got %s", waitForRejoinRequeue, res.RequeueAfter)
+	}
+	assertNotReady(t, c, reasonWaitingForClusterInfrastructure, "fc")
+}
+
+// A read failure that is not a NotFound is the API server's problem, not the
+// spec's. It surfaces as an error so the controller's backoff handles it, instead
+// of being reported to the operator as a connection they have to go and fix.
+func TestMachineReconcile_SurfacesATransientInfraClusterReadError(t *testing.T) {
+	s := testScheme(t)
+	boom := apierrors.NewServiceUnavailable("etcd leader election")
+	c := fake.NewClientBuilder().
+		WithScheme(s).
+		WithObjects(runningFixture()...).
+		WithStatusSubresource(&infrav1.KairosFleetMachine{}, &infrav1.KairosFleetCluster{}).
+		WithInterceptorFuncs(interceptor.Funcs{
+			Get: func(ctx context.Context, cl client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+				if _, ok := obj.(*infrav1.KairosFleetCluster); ok {
+					return boom
+				}
+				return cl.Get(ctx, key, obj, opts...)
+			},
+		}).
+		Build()
+	r := &KairosFleetMachineReconciler{
+		Client:             c,
+		Scheme:             s,
+		FleetClientFactory: func(_, _ string) fleet.Client { return &fleet.FakeClient{} },
+	}
+
+	_, err := r.Reconcile(context.Background(), ctrl.Request{
+		NamespacedName: types.NamespacedName{Namespace: testNS, Name: "kfm"},
+	})
+	if err == nil {
+		t.Fatalf("expected a transient read error to surface")
+	}
+	if !strings.Contains(err.Error(), "etcd leader election") {
+		t.Fatalf("expected the read error to be carried, got %v", err)
+	}
+}
+
+// A transient read failure on the Secret reaches the machine as a wait, not as an
+// incomplete connection: nothing about the KairosFleetCluster is wrong.
+func TestMachineReconcile_WaitsOnATransientSecretReadError(t *testing.T) {
+	s := testScheme(t)
+	boom := apierrors.NewServiceUnavailable("etcd leader election")
+	c := fake.NewClientBuilder().
+		WithScheme(s).
+		WithObjects(runningFixture()...).
+		WithStatusSubresource(&infrav1.KairosFleetMachine{}, &infrav1.KairosFleetCluster{}).
+		WithInterceptorFuncs(interceptor.Funcs{
+			Get: func(ctx context.Context, cl client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+				if sec, ok := obj.(*corev1.Secret); ok && key.Name == "ab-token" {
+					_ = sec
+					return boom
+				}
+				return cl.Get(ctx, key, obj, opts...)
+			},
+		}).
+		Build()
+	r := &KairosFleetMachineReconciler{
+		Client:             c,
+		Scheme:             s,
+		FleetClientFactory: func(_, _ string) fleet.Client { return &fleet.FakeClient{} },
+	}
+
+	res, err := r.Reconcile(context.Background(), ctrl.Request{
+		NamespacedName: types.NamespacedName{Namespace: testNS, Name: "kfm"},
+	})
+	if err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+	if res.RequeueAfter != waitForCapacityRequeue {
+		t.Fatalf("expected a %s requeue, got %s", waitForCapacityRequeue, res.RequeueAfter)
+	}
+	assertNotReady(t, c, reasonWaitingForClusterInfrastructure, "etcd leader election")
+}
