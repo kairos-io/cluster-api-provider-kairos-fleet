@@ -1,4 +1,4 @@
-# syntax=docker/dockerfile:1.7
+# syntax=docker/dockerfile:1.28
 # Build the manager binary.
 #
 # golang:1.27-bookworm pinned by digest. The builder must be at least go.mod's
