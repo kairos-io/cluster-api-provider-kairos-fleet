@@ -32,7 +32,7 @@ jobs:
           # v2.12.2 is built on go 1.25.0 and even v2.13.2 (2026-08-27) on
           # go 1.26.0, so no released version can lint against a 1.27 stdlib.
           # Raise this only together with a golangci-lint built on 1.27+.
-          go-version: "1.26"
+          go-version: "1.27"
           check-latest: true
 
       - name: Run linter
