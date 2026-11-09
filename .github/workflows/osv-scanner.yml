@@ -24,9 +24,10 @@ permissions:
   contents: read
 
 # The reusable workflows are SHA-pinned (and SHA-pin their own actions), but their
-# scanner steps pull docker://ghcr.io/google/osv-scanner-action:v2.5.1 by tag.
-# Residual risk accepted for org consistency; release builds do not consume
-# Actions caches (release.yml), which bounds what a repointed image could reach.
+# scanner steps pull the ghcr.io/google/osv-scanner-action image by the release
+# tag matching the pins below, not by digest. Residual risk accepted for org
+# consistency; release builds do not consume Actions caches (release.yml), which
+# bounds what a repointed image could reach.
 jobs:
   # A pull request is scanned against its own base, so the check only goes red
   # for an advisory the pull request itself introduces. An advisory published
