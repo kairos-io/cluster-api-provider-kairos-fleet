@@ -1,4 +1,8 @@
-# syntax=docker/dockerfile:1.29
+# syntax=docker/dockerfile:1.29@sha256:572cebbc2b15e6f84c077742952674889cb63cd5e9b80abdffcbe587b6f19183
+# The syntax line pins the Dockerfile frontend by digest as well as by tag,
+# like the two base images below. The frontend turns this file into the build
+# graph, and a tag can be moved. Renovate updates the tag and digest together.
+#
 # Build the manager binary.
 #
 # golang:1.27-bookworm pinned by digest. The builder must be at least go.mod's
