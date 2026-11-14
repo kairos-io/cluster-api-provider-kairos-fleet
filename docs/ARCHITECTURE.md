@@ -105,8 +105,8 @@ it notices the loss only once the reboot has been requested.
 The controller does not poll a machine once it is provisioned. It runs again
 on changes to the `KairosFleetMachine` or its `Machine`, and on the manager's
 periodic resync, and each run repeats the rejoin check. A run that finds the
-node no longer `Online` reports `WaitingForNodeRejoin` and sets
-`status.initialization.provisioned` back to false.
+node no longer `Online` reports `WaitingForNodeRejoin` on the `Ready`
+condition.
 
 The `KairosFleetCluster` controller is simpler. It checks that the
 AuroraBoot connection is complete (`spec.auroraboot.url` is set, and the
