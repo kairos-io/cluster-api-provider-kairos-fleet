@@ -1,10 +1,11 @@
 name: Release
 
-# Tagging vX.Y.Z first scans the tagged tree for known vulnerabilities and
-# stops if any are open. It then builds and pushes a multi-arch image, signs it
-# keylessly with cosign, attaches an SBOM + provenance, and publishes a GitHub
-# release with the clusterctl assets (infrastructure-components.yaml pinned to
-# the image digest, metadata.yaml, cluster-template.yaml).
+# Tagging vX.Y.Z first runs an OSV scan of the tagged tree's dependencies and
+# stops on any finding the scanner fails on. It then builds and pushes a
+# multi-arch image, signs it keylessly with cosign, attaches an SBOM +
+# provenance, and publishes a GitHub release with the clusterctl assets
+# (infrastructure-components.yaml pinned to the image digest, metadata.yaml,
+# cluster-template.yaml).
 on:
   push:
     tags:
@@ -23,18 +24,26 @@ env:
 
 jobs:
   # A tag push matches none of osv-scanner.yml's triggers (pull_request, push to
-  # main, the Monday cron), and that workflow is the only whole-tree scan in the
-  # repository. Without this job a release cut between two Mondays can publish
-  # while an advisory is already open against an unchanged dependency, with
-  # nothing red anywhere.
+  # main, the Monday cron), and test.yml's govulncheck does not run on tags
+  # either. Without this job a release cut between two Mondays can publish while
+  # an advisory is already open against an unchanged dependency, with nothing
+  # red anywhere.
   #
-  # The scanner is the one osv-scanner.yml runs: its reusable workflows, pinned
-  # at b1d267ae (v2.7.0), call google/osv-scanner-action at the SHA pinned below,
-  # with the same default arguments ("-r ./"). Bump the two pins together. If an
-  # osv-scanner.toml is ever added, pass it as --config here and there in the
-  # same change, so the two scans cannot disagree about what is ignored.
+  # The pin below is the same google/osv-scanner-action commit osv-scanner.yml
+  # pins (b1d267ae, the v2.7.0 tag); bump them together. The reusable workflows
+  # there call the action at 0a65f82, an ancestor whose osv-scanner-action/
+  # action.yml is identical, with the same default arguments ("-r ./"). The
+  # scanner loads an osv-scanner.toml found next to a scanned manifest by
+  # itself, so an ignore added there applies to both scans.
   #
-  # The scan reads the tagged tree, not main: the release is what ships.
+  # The scan reads the tagged tree, not main: the release is what ships. The
+  # trade-off is that an ignore added in the tagged commit silences this gate,
+  # so a change to an osv-scanner.toml wants review on its own.
+  #
+  # What it does not cover: findings the scanner's Go call analysis marks as
+  # uncalled do not fail it, the Go standard library is not checked (test.yml's
+  # govulncheck covers it on main and pull requests), and the image's OS
+  # packages are not scanned.
   #
   # The action is called directly, not through the reusable workflow, and
   # without continue-on-error, so a finding and a scanner error both fail the
@@ -49,6 +58,9 @@ jobs:
   osv:
     name: osv-scan (release gate)
     runs-on: ubuntu-latest
+    # A hung scan fails closed anyway, but would hold the release for the
+    # six-hour job default.
+    timeout-minutes: 15
     permissions:
       contents: read
     steps:
@@ -58,7 +70,7 @@ jobs:
           persist-credentials: false
 
       - name: Scan for known vulnerabilities
-        uses: google/osv-scanner-action/osv-scanner-action@0a65f82af05cd58cf587827b0bb0489548c18346 # v2.7.0
+        uses: google/osv-scanner-action/osv-scanner-action@b1d267aea5211fa648d9d442fa64b90dbdcbdd36 # v2.7.0
         with:
           scan-args: |-
             --format=json
@@ -81,7 +93,7 @@ jobs:
             exit 1
           fi
           vulns=$(jq '[.results[]?.packages[]?.vulnerabilities[]?] | length' osv-results.json)
-          echo "OSV scan completed; ${vulns} unignored vulnerability record(s) in the results."
+          echo "OSV scan completed; ${vulns} vulnerability record(s) in the results, counting any the scanner marked uncalled."
 
   release:
     name: Build, sign and publish
@@ -101,9 +113,22 @@ jobs:
         with:
           go-version: "1.27"
           check-latest: true
+          # A release must build from the tagged tree alone. `make
+          # release-manifests` runs `go install` for kustomize and
+          # controller-gen, which render the published
+          # infrastructure-components.yaml, and Go trusts a restored module or
+          # build cache without checking it again. The scanner container in the
+          # osv job above runs on this tag's cache scope first, pulled by a tag
+          # rather than a digest; with caching on, a repointed scanner image
+          # could plant the exact cache key this step restores.
+          cache: false
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
+        with:
+          # Same reason: do not docker-load a binfmt image tarball from the
+          # Actions cache into the job that signs the release.
+          cache-image: false
 
       - name: Set up Buildx
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
