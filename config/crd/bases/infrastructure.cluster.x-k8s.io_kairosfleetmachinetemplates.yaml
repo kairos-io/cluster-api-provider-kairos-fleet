@@ -98,8 +98,10 @@ spec:
                       providerID:
                         description: |-
                           providerID is the identifier for the claimed AuroraBoot node, in the form
-                          "kairos-fleet://<id>". It is SET BY THE CONTROLLER after a node is claimed and its
-                          kubelet reports the matching value; it is immutable once set. Users must not set it.
+                          "kairos-fleet://<id>". The controller sets it once the node has rejoined as Online
+                          after the reboot that applies its bootstrap cloud-config, at the same time it sets
+                          status.initialization.provisioned. It is not validated or protected against edits:
+                          users must not set or change it.
                         type: string
                     required:
                     - group

@@ -171,14 +171,14 @@ spec:
                 x-kubernetes-list-type: map
               failureMessage:
                 description: |-
-                  failureMessage is a terminal, human-readable description of a failure. It is set only
-                  when the cluster has entered an unrecoverable state.
+                  failureMessage is a human-readable description of the failure named by failureReason.
+                  It is currently never set by this controller.
                 type: string
               failureReason:
                 description: |-
-                  failureReason is a terminal, programmatic failure indication. It is set only when the
-                  cluster has entered an unrecoverable state. (Deprecated in the CAPI v1beta2 contract
-                  but still surfaced.)
+                  failureReason is a programmatic failure indication. It is part of the deprecated
+                  CAPI failure fields and is currently never set by this controller; waits and errors
+                  are reported through the Ready condition.
                 type: string
               initialization:
                 description: initialization provides observations of the KairosFleetCluster
@@ -186,8 +186,10 @@ spec:
                 properties:
                   provisioned:
                     description: |-
-                      provisioned is true when the infrastructure cluster is fully provisioned. This is the
-                      Cluster API v1beta2 InfraCluster readiness signal read by the core Cluster controller.
+                      provisioned is true once the AuroraBoot connection resolves (the admin-token Secret
+                      exists and is usable) and spec.controlPlaneEndpoint has a host. This is the Cluster
+                      API v1beta2 InfraCluster initialization signal read by the core Cluster controller.
+                      Once true it stays true; the Ready condition reports the current state.
                     type: boolean
                 type: object
             type: object

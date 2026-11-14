@@ -73,8 +73,10 @@ spec:
               providerID:
                 description: |-
                   providerID is the identifier for the claimed AuroraBoot node, in the form
-                  "kairos-fleet://<id>". It is SET BY THE CONTROLLER after a node is claimed and its
-                  kubelet reports the matching value; it is immutable once set. Users must not set it.
+                  "kairos-fleet://<id>". The controller sets it once the node has rejoined as Online
+                  after the reboot that applies its bootstrap cloud-config, at the same time it sets
+                  status.initialization.provisioned. It is not validated or protected against edits:
+                  users must not set or change it.
                 type: string
             required:
             - group
@@ -85,7 +87,9 @@ spec:
               addresses:
                 description: |-
                   addresses is the list of addresses reported for the claimed node, mirrored from
-                  AuroraBoot's reported node addresses (for example InternalIP and Hostname).
+                  AuroraBoot's reported node addresses (for example InternalIP and Hostname). The
+                  controller refreshes it each time the node is observed rejoined, not while the
+                  node is claimed but still waiting to rejoin.
                 items:
                   description: MachineAddress contains information for the node's
                     address.
@@ -174,14 +178,15 @@ spec:
                 x-kubernetes-list-type: map
               failureMessage:
                 description: |-
-                  failureMessage is a terminal, human-readable description of a failure. It is set only
-                  when the machine has entered an unrecoverable state.
+                  failureMessage is a human-readable description of the failure named by
+                  failureReason, and is set together with it.
                 type: string
               failureReason:
                 description: |-
-                  failureReason is a terminal, programmatic failure indication. It is set only when the
-                  machine has entered an unrecoverable state. (Deprecated in the CAPI v1beta2 contract
-                  but still surfaced.)
+                  failureReason is a programmatic failure indication. The controller sets it when the
+                  claimed AuroraBoot node no longer exists (reason "NodeMissing"); the Ready condition
+                  carries the same reason. (Deprecated in the CAPI v1beta2 contract but still
+                  surfaced.)
                 type: string
               initialization:
                 description: initialization provides observations of the KairosFleetMachine
@@ -189,10 +194,10 @@ spec:
                 properties:
                   provisioned:
                     description: |-
-                      provisioned is true when the infrastructure machine is fully provisioned: a node has
-                      been claimed, its bootstrap cloud-config applied, and it has booted its active image
-                      and reported ready. This is the Cluster API v1beta2 InfraMachine readiness signal read
-                      by the core Machine controller.
+                      provisioned is true once a node has been claimed, its bootstrap cloud-config applied,
+                      and the node has been rebooted and has rejoined AuroraBoot as Online. This is the
+                      Cluster API v1beta2 InfraMachine initialization signal read by the core Machine
+                      controller. Once true it stays true; the Ready condition reports the current state.
                     type: boolean
                 type: object
             type: object
