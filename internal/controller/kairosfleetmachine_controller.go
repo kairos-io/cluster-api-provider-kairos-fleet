@@ -605,7 +605,12 @@ func (r *KairosFleetMachineReconciler) bootstrapData(ctx context.Context, machin
 }
 
 func (r *KairosFleetMachineReconciler) notReady(fleetMachine *infrav1.KairosFleetMachine, reason, message string) {
-	fleetMachine.Status.Initialization.Provisioned = ptr.To(false)
+	// status.initialization.provisioned is a one-way latch: Cluster API ignores a
+	// provisioned machine flipping back, so only a never-provisioned machine is
+	// reported false. The Ready condition below still reports the current state.
+	if !ptr.Deref(fleetMachine.Status.Initialization.Provisioned, false) {
+		fleetMachine.Status.Initialization.Provisioned = ptr.To(false)
+	}
 	meta.SetStatusCondition(&fleetMachine.Status.Conditions, metav1.Condition{
 		Type:               clusterv1.ReadyCondition,
 		Status:             metav1.ConditionFalse,

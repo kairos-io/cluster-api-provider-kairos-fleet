@@ -104,7 +104,7 @@ func (r *KairosFleetClusterReconciler) Reconcile(ctx context.Context, req ctrl.R
 		setCondition(&fleetCluster.Status.Conditions, fleetCluster.Generation,
 			clusterv1.ReadyCondition, metav1.ConditionFalse, "AuroraBootConnectionNotReady",
 			"Waiting for a valid AuroraBoot connection")
-		fleetCluster.Status.Initialization.Provisioned = ptr.To(false)
+		markNotProvisioned(fleetCluster)
 		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
 	}
 
@@ -115,7 +115,7 @@ func (r *KairosFleetClusterReconciler) Reconcile(ctx context.Context, req ctrl.R
 		setCondition(&fleetCluster.Status.Conditions, fleetCluster.Generation,
 			clusterv1.ReadyCondition, metav1.ConditionFalse, "WaitingForControlPlaneEndpoint",
 			"Waiting for spec.controlPlaneEndpoint to be set")
-		fleetCluster.Status.Initialization.Provisioned = ptr.To(false)
+		markNotProvisioned(fleetCluster)
 		return ctrl.Result{}, nil
 	}
 
@@ -124,6 +124,15 @@ func (r *KairosFleetClusterReconciler) Reconcile(ctx context.Context, req ctrl.R
 		clusterv1.ReadyCondition, metav1.ConditionTrue, "Provisioned",
 		"Infrastructure cluster is provisioned")
 	return ctrl.Result{}, nil
+}
+
+// markNotProvisioned reports provisioned=false only for a cluster that has never
+// been provisioned: status.initialization.provisioned is a one-way latch in the
+// InfraCluster contract, so a later outage is reported through Ready alone.
+func markNotProvisioned(fleetCluster *infrav1.KairosFleetCluster) {
+	if !ptr.Deref(fleetCluster.Status.Initialization.Provisioned, false) {
+		fleetCluster.Status.Initialization.Provisioned = ptr.To(false)
+	}
 }
 
 func (r *KairosFleetClusterReconciler) fleetFactory() FleetClientFactory {

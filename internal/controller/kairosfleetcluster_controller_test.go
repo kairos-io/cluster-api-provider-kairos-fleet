@@ -18,11 +18,13 @@ package controller
 
 import (
 	"context"
+	"testing"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -87,3 +89,25 @@ var _ = Describe("KairosFleetCluster Controller", func() {
 		})
 	})
 })
+
+func TestMarkNotProvisioned(t *testing.T) {
+	tests := []struct {
+		name string
+		in   *bool
+		want bool
+	}{
+		{"never provisioned reports false", nil, false},
+		{"already false stays false", ptr.To(false), false},
+		{"provisioned latches true", ptr.To(true), true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fc := &infrastructurev1alpha1.KairosFleetCluster{}
+			fc.Status.Initialization.Provisioned = tt.in
+			markNotProvisioned(fc)
+			if fc.Status.Initialization.Provisioned == nil || *fc.Status.Initialization.Provisioned != tt.want {
+				t.Fatalf("provisioned = %v, want %v", fc.Status.Initialization.Provisioned, tt.want)
+			}
+		})
+	}
+}
