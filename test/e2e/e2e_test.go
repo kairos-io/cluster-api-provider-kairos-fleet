@@ -31,16 +31,16 @@ import (
 )
 
 // namespace where the project is deployed in
-const namespace = "cluster-api-provider-kairos-fleet-system"
+const namespace = "capi-kairos-fleet-system"
 
 // serviceAccountName created for the project
-const serviceAccountName = "cluster-api-provider-kairos-fleet-controller-manager"
+const serviceAccountName = "capi-kairos-fleet-controller-manager"
 
 // metricsServiceName is the name of the metrics service of the project
-const metricsServiceName = "cluster-api-provider-kairos-fleet-controller-manager-metrics-service"
+const metricsServiceName = "capi-kairos-fleet-controller-manager-metrics-service"
 
 // metricsRoleBindingName is the name of the RBAC that will be created to allow get the metrics data
-const metricsRoleBindingName = "cluster-api-provider-kairos-fleet-metrics-binding"
+const metricsRoleBindingName = "capi-kairos-fleet-metrics-binding"
 
 var _ = Describe("Manager", Ordered, func() {
 	var controllerPodName string
@@ -173,7 +173,7 @@ var _ = Describe("Manager", Ordered, func() {
 		It("should ensure the metrics endpoint is serving metrics", func() {
 			By("creating a ClusterRoleBinding for the service account to allow access to metrics")
 			cmd := exec.Command("kubectl", "create", "clusterrolebinding", metricsRoleBindingName,
-				"--clusterrole=cluster-api-provider-kairos-fleet-metrics-reader",
+				"--clusterrole=capi-kairos-fleet-metrics-reader",
 				fmt.Sprintf("--serviceaccount=%s:%s", namespace, serviceAccountName),
 			)
 			_, err := utils.Run(cmd)
