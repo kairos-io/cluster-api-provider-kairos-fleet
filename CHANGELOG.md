@@ -7,6 +7,65 @@ Entries are grouped by Added, Changed, Fixed, Security, and Breaking as
 needed; see [docs/release-notes/](docs/release-notes/) for the fuller
 narrative behind each release.
 
+## [v0.1.4] - 2026-11-14
+
+A fix release for the `KairosFleetMachine` controller. No CRD or API change
+and no migration steps from v0.1.3. See the
+[v0.1.4 release notes](docs/release-notes/v0.1.4.md).
+
+### Fixed
+
+- Deleting a machine no longer hangs when its `KairosFleetCluster` or
+  admin-token Secret is gone, or the connection has no url or token: the
+  delete finishes without a release. A transient read error is now retried
+  instead of skipping the release. (#21)
+- Deleting a machine after `clusterctl move` or a restore no longer retries a
+  `409 ClaimMismatch` forever. The release presents the key recorded at claim
+  time, and a `ClaimMismatch` on release is final. (#27)
+- A reboot the node refuses sets the `Ready` reason `RebootFailed` and is
+  retried about once a minute, instead of leaving the machine on
+  `WaitingForNodeRejoin` for good. The controller acts on the failure only
+  while the node reports `Online`. (#23, #24)
+- Retries of a refused `apply-cloud-config` are paced about a minute apart.
+  v0.1.3 queued a fresh command, carrying the full bootstrap cloud-config, on
+  every pass. (#26)
+- `status.addresses` lists the addresses the node reports after its hostname,
+  dropping types Cluster API does not define, empty or over-long values, and
+  repeats. (#25)
+- An unusable AuroraBoot connection is reported as
+  `AuroraBootConnectionIncomplete`, `WaitingForAuroraBootSecret` or
+  `WaitingForClusterInfrastructure`, with a message naming the cause. (#28)
+
+### Added
+
+- The controller-managed `KairosFleetMachine` annotations `claim-key`,
+  `reboot-command-id` and `retry-not-before`.
+- The `Ready` reasons `RebootFailed`, `AuroraBootConnectionIncomplete` and
+  `WaitingForAuroraBootSecret`.
+
+### Changed
+
+- The release workflow starts with an OSV scan of the tagged tree and stops
+  on any finding, and no longer restores Actions caches. (#60)
+- The pull-request OSV scan reports only what a change introduces. (#44)
+- The `Dockerfile` pins its frontend by digest. (#55, #57)
+- The lint job runs on Go 1.27 with golangci-lint v2.15.0; `go.mod`'s `go`
+  directive stays at 1.26.0. (#35, #36)
+- The documentation lists `apply-cloud-config` and `reboot` as the commands a
+  node's `phonehome.allowed_commands` must permit. It also listed `reset`,
+  which no release of this provider sends.
+
+### Security
+
+- `golang.org/x/net` v0.62.0, for HTTP/2 advisories that govulncheck reports
+  as reachable from the v0.1.3 manager. (#34, #43)
+- OpenTelemetry v1.47.0, for GO-2026-6505 (GHSA-8wmf-6v46-5gfg) and
+  GHSA-q7gw-24fr-5p69. (#22, #58)
+- `github.com/google/cel-go` v0.30.0, for GO-2026-6094 (imported, not
+  called). (#41)
+- The builder image moves from Go 1.27.1 to Go 1.27.4, and the distroless
+  runtime base digest is refreshed. (#54, #56)
+
 ## [v0.1.3] - 2026-09-17
 
 A maintenance release. No functional change to the controller, CRDs, cluster
@@ -165,5 +224,9 @@ Initial release.
   `infrastructure-components.yaml` with the controller image pinned by
   digest, signed with cosign, and accompanied by an SBOM.
 
+[v0.1.4]: https://github.com/kairos-io/cluster-api-provider-kairos-fleet/releases/tag/v0.1.4
+[v0.1.3]: https://github.com/kairos-io/cluster-api-provider-kairos-fleet/releases/tag/v0.1.3
+[v0.1.2]: https://github.com/kairos-io/cluster-api-provider-kairos-fleet/releases/tag/v0.1.2
+[v0.1.1]: https://github.com/kairos-io/cluster-api-provider-kairos-fleet/releases/tag/v0.1.1
 [v0.1.0]: https://github.com/kairos-io/cluster-api-provider-kairos-fleet/releases/tag/v0.1.0
 [v0.1.0-beta.1]: https://github.com/kairos-io/cluster-api-provider-kairos-fleet/releases/tag/v0.1.0-beta.1
