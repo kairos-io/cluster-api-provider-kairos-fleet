@@ -1,6 +1,6 @@
 # Quickstart
 
-> Last verified against: cluster-api-provider-kairos-fleet v0.1.3,
+> Last verified against: cluster-api-provider-kairos-fleet v0.1.4,
 > Cluster API v1.13.4 (v1beta2 contract), Kairos v4.1.2, k3s (k0s also
 > supported).
 
@@ -30,24 +30,27 @@ AuroraBoot fleet.
 - Both k3s and k0s have fleet providerID self-discovery implemented (see
   [ARCHITECTURE.md](ARCHITECTURE.md#providerid)). This quickstart uses
   `distribution: k3s`, the reference and most-exercised path, matching the
-  default template. To use k0s instead, set `distribution: k0s` on both the
-  `KairosControlPlane` and the `KairosConfigTemplate` (see
+  default template. To use k0s instead, set `distribution: k0s` on the
+  `KairosControlPlane` and on both `KairosConfigTemplate`s (see
   `templates/cluster-template.yaml`).
 - AuroraBoot nodes enrolled with a `phonehome.allowed_commands` policy that
-  permits `apply-cloud-config`, `reboot`, and `reset` — not AuroraBoot's
-  install-agent default. This is the most common first-run failure; see
-  "AuroraBoot node enrolment prerequisite" below before enrolling nodes.
+  permits `apply-cloud-config` and `reboot`. AuroraBoot's install-agent
+  default does not include `apply-cloud-config`. This is the most common
+  first-run failure; see "AuroraBoot node enrolment prerequisite" below
+  before enrolling nodes.
 
 ## AuroraBoot node enrolment prerequisite
 
-This provider issues three AuroraBoot node commands: `apply-cloud-config`,
-`reboot`, and `reset`. AuroraBoot's node-enrolment helper (`GET
+This provider sends a claimed node two AuroraBoot commands:
+`apply-cloud-config`, to stage the bootstrap cloud-config, and `reboot`, to
+apply it. Releasing a node on delete is a call to the AuroraBoot server and
+needs no node permission. AuroraBoot's node-enrolment helper (`GET
 /api/v1/install-agent`, the `curl ... | sh` script most nodes run to enrol)
 defaults a node's `phonehome.allowed_commands` policy to
 `upgrade,upgrade-recovery,reboot,unregister`, which does not include
-`apply-cloud-config` or `reset`. A node enrolled with that default fails its
-very first bootstrap apply, and its `KairosFleetMachine` surfaces this on the
-`Ready` condition:
+`apply-cloud-config`. A node enrolled with that default fails its very first
+bootstrap apply, and its `KairosFleetMachine` surfaces this on the `Ready`
+condition:
 
 ```
 command "apply-cloud-config" is not permitted by the phonehome policy; add it to phonehome.allowed_commands in cloud-config to opt in
@@ -60,7 +63,7 @@ Fix this before enrolling nodes, either of two ways:
 
   ```bash
   export REGISTRATION_TOKEN=<the fleet's registration token>
-  export AURORABOOT_ALLOWED_COMMANDS=upgrade,upgrade-recovery,reboot,unregister,apply-cloud-config,reset
+  export AURORABOOT_ALLOWED_COMMANDS=upgrade,upgrade-recovery,reboot,unregister,apply-cloud-config
   curl -fsSL "$AURORABOOT_URL/api/v1/install-agent" | sh
   ```
 
@@ -68,12 +71,16 @@ Fix this before enrolling nodes, either of two ways:
   `AURORABOOT_GROUP` too if the node should land in a specific group.
 
 - Or set `phonehome.allowed_commands` directly in the node's own cloud-config,
-  to a list containing at least `apply-cloud-config`, `reboot`, and `reset`.
+  to a list containing at least `apply-cloud-config` and `reboot`.
 
 The list is a replacement, not an addition: a `phonehome.allowed_commands`
 that names only `apply-cloud-config` drops `reboot` along with the rest of the
 default set, and the machine then fails at the reboot step instead of the
 apply step, with `RebootFailed` on its `Ready` condition.
+
+This provider does not send `reset` (see
+[ARCHITECTURE.md](ARCHITECTURE.md#delete-release-versus-reset)), so the
+policy does not need to allow it. Earlier versions of this guide listed it.
 
 ### Fixing an already-enrolled node
 
@@ -161,25 +168,27 @@ kubectl get kairosfleetmachines -n demo -w
 | Reason | Meaning |
 | --- | --- |
 | `WaitingForBootstrapData` | Waiting for the Kairos bootstrap provider to publish the cloud-config Secret. |
-| `WaitingForClusterInfrastructure` | Waiting for the KairosFleetCluster's AuroraBoot connection to become valid. |
+| `WaitingForClusterInfrastructure` | The `KairosFleetCluster` does not exist yet, or reading its admin-token Secret failed in a way that can clear on its own. |
+| `WaitingForAuroraBootSecret` | The admin-token Secret the `KairosFleetCluster` names does not exist yet. Creating it (step 1) is enough. |
+| `AuroraBootConnectionIncomplete` | The connection cannot work as written: the `KairosFleetCluster` has no `auroraboot.url`, or the admin-token Secret has no `token` key. Waiting does not fix it; edit the `KairosFleetCluster` or the Secret. The condition message names which. |
 | `GroupNotFound` | `spec.group` does not match any AuroraBoot group by name or ID. Not terminal: create the group or fix the name and the machine picks it up on the next reconcile. |
 | `WaitingForCapacity` | The target group has no unclaimed nodes. Enroll more nodes in AuroraBoot or free one up. |
 | `NodeClaimed` | A node has been claimed; applying its bootstrap cloud-config next. |
 | `ApplyingCloudConfig` | The cloud-config has been handed to AuroraBoot and is being written to the node, or the controller is waiting for that write to complete. |
-| `CloudConfigFailed` | The apply-cloud-config command reported `Failed` or `Expired` — commonly because the node's AuroraBoot phonehome policy does not permit the command (see "AuroraBoot node enrolment prerequisite" above). Not terminal: the controller clears the applied-config marker and retries automatically once the node accepts the command. |
+| `CloudConfigFailed` | The apply-cloud-config command reported `Failed` or `Expired`, commonly because the node's AuroraBoot phonehome policy does not permit the command (see "AuroraBoot node enrolment prerequisite" above). Not terminal: the controller clears the applied-config marker and queues a fresh command about once a minute, so the machine moves on once the node accepts it. |
 | `Rebooting` | The controller has requested a reboot so the node applies the staged config. |
-| `RebootFailed` | The reboot command reported `Failed` or `Expired`. `reboot` has its own entry in the node's `allowed_commands` policy, so a node that accepted the apply can still refuse it. Not terminal: the controller clears the reboot markers and issues a fresh reboot about once a minute. |
+| `RebootFailed` | The reboot command reported `Failed` or `Expired` while the node was still `Online`. `reboot` has its own entry in the node's `allowed_commands` policy, so a node that accepted the apply can still refuse it. Not terminal: the controller clears the reboot markers and issues a fresh reboot about once a minute. |
 | `WaitingForNodeRejoin` | Waiting for the node to come back `Online` with a heartbeat newer than the reboot request. |
 | `NodeMissing` | The claimed AuroraBoot node no longer exists. Terminal: `status.failureReason` and `status.failureMessage` are set; the machine does not retry itself. |
 | `Provisioned` | The node is claimed, configured, and Online. `spec.providerID` and `status.addresses` are set. |
 
 A machine stuck on `WaitingForCapacity` needs more enrolled nodes in that
-group. A machine that reaches `CloudConfigFailed` is not terminal and needs
-no manual action beyond fixing the node (see "AuroraBoot node enrolment
-prerequisite" above); the controller retries on its own. A machine that
-reaches `NodeMissing` has failed terminally (`status.failureReason` /
-`status.failureMessage` are set); inspect the AuroraBoot node's command
-history and re-create the Machine.
+group. A machine that reaches `CloudConfigFailed` or `RebootFailed` is not
+terminal and needs no manual action beyond fixing the node (see "AuroraBoot
+node enrolment prerequisite" above); the controller retries on its own. A
+machine that reaches `NodeMissing` has failed terminally
+(`status.failureReason` / `status.failureMessage` are set); inspect the
+AuroraBoot node's command history and re-create the Machine.
 
 A worker machine that stays at `WaitingForBootstrapData` past this point is
 most likely waiting on the join-token Secret created in step 5 below; that
@@ -245,26 +254,50 @@ configuration. See
 [ARCHITECTURE.md](ARCHITECTURE.md#delete-release-versus-reset) for the v0.1
 delete policy.
 
+Delete the Cluster, not the `KairosFleetCluster`, and keep the admin-token
+Secret until the Cluster is gone: each machine releases its node through that
+connection. If the `KairosFleetCluster` or the Secret is already gone, or the
+connection has no url or token, the machine finishes deleting without a
+release and its node stays claimed in AuroraBoot. Release such a node in
+AuroraBoot.
+
 ## Troubleshooting
 
 - **Machine stuck at `CloudConfigFailed`, with a `Ready` condition message
   containing `is not permitted by the phonehome policy`.** The node's
-  AuroraBoot phonehome policy does not allow the `apply-cloud-config` (or
-  `reset`) command this provider issues. Fix the node's
+  AuroraBoot phonehome policy does not allow the `apply-cloud-config`
+  command this provider issues. Fix the node's
   `phonehome.allowed_commands` (see "AuroraBoot node enrolment prerequisite"
   above) and restart its phonehome agent. No Machine deletion or re-creation
   is needed: the controller retries automatically once the node accepts the
   command.
+- **Machine stuck at `RebootFailed`.** The node accepted the apply but
+  refused the reboot. The usual cause is a `phonehome.allowed_commands` list
+  that names `apply-cloud-config` without `reboot`: the list replaces the
+  default rather than adding to it. Add `reboot` and restart the phonehome
+  agent; the controller issues a fresh reboot about once a minute.
 - **Worker machine stuck at `WaitingForBootstrapData` after the
   control-plane machine reaches `Provisioned`.** The worker's
   `KairosConfigTemplate` needs a join-token Secret
   (`K3S_TOKEN_SECRET_NAME`/`k3sTokenSecretRef` for k3s,
   `workerTokenSecretRef` for k0s) that this quickstart does not create until
   step 5. Create it and provisioning continues with no further action.
-- **Machine stuck at `WaitingForClusterInfrastructure`.** The
-  KairosFleetCluster cannot resolve its AuroraBoot connection: check that the
-  admin-token Secret exists in the same namespace and has a non-empty `token`
-  key, and that `spec.auroraboot.url` is reachable from the controller pod.
+- **Machine stuck at `WaitingForClusterInfrastructure`.** The Cluster's
+  `KairosFleetCluster` does not exist, or the controller cannot read the
+  admin-token Secret. Check that the `KairosFleetCluster` named by the
+  Cluster's `infrastructureRef` exists, and look in the controller logs for
+  the read error.
+- **Machine stuck at `WaitingForAuroraBootSecret` or
+  `AuroraBootConnectionIncomplete`.** The `Ready` condition message names the
+  missing Secret or field. Create the admin-token Secret in the Cluster's
+  namespace with a `token` key (step 1), or set `spec.auroraboot.url` on the
+  `KairosFleetCluster`.
+- **AuroraBoot unreachable, or `spec.auroraboot.url` wrong.** The controller
+  does not test the URL until it first calls AuroraBoot, so no condition
+  reason names this. The reconcile fails and is retried with backoff, and the
+  controller logs show the request error (for a machine that has not claimed
+  a node yet, `resolving group ...`). Check that the URL is reachable from
+  the controller pod.
 - **Machine stuck at `GroupNotFound`.** `spec.group` does not resolve to an
   AuroraBoot group by name or ID. Check the value:
   `kubectl get kairosfleetmachine -n demo -o jsonpath='{.items[0].spec.group}'`,
@@ -272,9 +305,13 @@ delete policy.
 - **Machine stuck at `WaitingForCapacity`.** The target group has no
   unclaimed nodes. Confirm the group name matches an AuroraBoot group with
   enrolled nodes: `kubectl get kairosfleetmachine -n demo -o jsonpath='{.items[0].spec.group}'`.
-- **KairosFleetCluster never reports `Provisioned`.**
-  `spec.controlPlaneEndpoint.host` is unset or empty. This provider does not
-  allocate an endpoint; set it explicitly (see step 2).
+- **KairosFleetCluster never reports `Provisioned`.** Its `Ready` condition
+  reason says what it is waiting on. `AuroraBootConnectionNotReady`:
+  `spec.auroraboot.url` is empty, or the admin-token Secret is missing,
+  unreadable, or has no `token` key; the controller log names which.
+  `WaitingForControlPlaneEndpoint`: `spec.controlPlaneEndpoint.host` is unset
+  or empty. This provider does not allocate an endpoint; set it explicitly
+  (see step 2).
 - **Node comes back after reboot but the Machine never leaves
   `WaitingForNodeRejoin`.** The controller requires the node's heartbeat to be
   newer than the recorded reboot time. Check that the AuroraBoot node's

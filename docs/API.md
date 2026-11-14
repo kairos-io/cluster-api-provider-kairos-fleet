@@ -1,6 +1,6 @@
 # API reference
 
-> Last verified against: cluster-api-provider-kairos-fleet v0.1.3,
+> Last verified against: cluster-api-provider-kairos-fleet v0.1.4,
 > API group `infrastructure.cluster.x-k8s.io/v1alpha1`.
 
 A hand-written field reference for the four Kairos Fleet API kinds. For the
@@ -25,9 +25,9 @@ The infrastructure side of a Cluster API `Cluster`.
 
 | Field | Type | Description |
 | --- | --- | --- |
-| `initialization.provisioned` | bool | The Cluster API v1beta2 InfraCluster readiness signal. True once `spec.controlPlaneEndpoint.host` is set and the AuroraBoot connection is valid. |
-| `conditions` | `[]metav1.Condition` | Includes a `Ready` condition describing the current wait state or failure reason. |
-| `failureReason` / `failureMessage` | string | Set only on a terminal, unrecoverable failure. |
+| `initialization.provisioned` | bool | The Cluster API v1beta2 InfraCluster readiness signal. True once the AuroraBoot connection is complete (`spec.auroraboot.url` is set and the admin-token Secret exists with a non-empty `token`) and `spec.controlPlaneEndpoint.host` is set. The controller does not call AuroraBoot to check the connection. |
+| `conditions` | `[]metav1.Condition` | Includes a `Ready` condition with the reason `AuroraBootConnectionNotReady`, `WaitingForControlPlaneEndpoint` or `Provisioned`. |
+| `failureReason` / `failureMessage` | string | Reserved for a terminal failure. The controller does not set them on a `KairosFleetCluster`: every state it reports can be fixed. |
 
 ## KairosFleetMachine
 

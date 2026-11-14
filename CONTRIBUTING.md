@@ -1,11 +1,12 @@
 # Contributing
 
-> Last verified against: cluster-api-provider-kairos-fleet v0.1.3;
+> Last verified against: cluster-api-provider-kairos-fleet v0.1.4;
 > CI workflows in `.github/workflows/`.
 
 ## Development setup
 
-Requires Go 1.26 or newer. Clone the repository and use the `Makefile` targets:
+Requires Go 1.26 or newer, the `go` directive in `go.mod`; CI and the release
+image build with Go 1.27. Clone the repository and use the `Makefile` targets:
 
 ```bash
 make manifests   # regenerate CRDs, RBAC, and webhook config from kubebuilder markers
@@ -34,10 +35,12 @@ source change.
 - **govulncheck**: runs in CI against the module
   (`golang.org/x/vuln/cmd/govulncheck` v1.6.0).
 - **OSV-Scanner**: scans the module's declared dependencies against the OSV
-  database on every pull request, on pushes to `main`, and weekly, following
-  the kairos-io org practice. Results appear under Security > Code scanning.
-  Note this covers dependencies, not the runtime base image's OS packages.
-- **Lint**: `golangci-lint` v2.12.2, configured in `.golangci.yml`.
+  database, following the kairos-io org practice. On a pull request it reports
+  only what the change introduces compared with the base branch; pushes to
+  `main`, a weekly run and manual runs scan the whole tree. Results appear
+  under Security > Code scanning. This covers declared dependencies, not the
+  Go standard library or the runtime base image's OS packages.
+- **Lint**: `golangci-lint` v2.15.0 on Go 1.27, configured in `.golangci.yml`.
 - **End-to-end** (`make test-e2e`): the current suite is the kubebuilder
   scaffold placeholder; it deploys the manager to a kind cluster and checks it
   starts. It runs on manual `workflow_dispatch` only in CI and does not gate
@@ -50,6 +53,17 @@ before merge.
 
 Dependency updates come from Renovate, configured in `renovate.json`. Its
 commits carry a `Signed-off-by` trailer so they satisfy the DCO check.
+
+## Releases
+
+Pushing a `v*` tag runs `.github/workflows/release.yml`. It starts with an
+OSV scan of the tagged tree, and any finding stops the release before
+anything is built or signed. It then builds and signs the multi-arch image,
+generates an SBOM, and publishes a GitHub release carrying
+`infrastructure-components.yaml` (image pinned by digest), `metadata.yaml`
+and `cluster-template.yaml`. The release body is
+`docs/release-notes/<tag>.md`, which must exist at the tagged commit or the
+release fails. A tag containing `-` is published as a prerelease.
 
 ## Commit policy
 

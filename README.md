@@ -35,9 +35,11 @@ The exercised topology is a single control-plane machine plus a
 It has been validated end to end on real hardware for both k3s and k0s
 workload clusters, together with the [Kairos bootstrap and control-plane
 providers](https://github.com/kairos-io/cluster-api-provider-kairos) at
-v0.1.3. High-availability control planes (`replicas` greater than 1) are out
-of scope for this provider. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
-for the full design and current limitations, and
+v0.1.3. That validation predates v0.1.4, whose fixes are covered by the unit
+and envtest suites rather than a new hardware run. High-availability control
+planes (`replicas` greater than 1) are out of scope for this provider. See
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full design and current
+limitations, and
 [docs/QUICKSTART.md](docs/QUICKSTART.md) to provision a cluster.
 
 ## API types
@@ -77,7 +79,7 @@ A fleet cluster composes three Cluster API providers, installed together with
 | Kubernetes, workload cluster | Chosen per cluster. Supported range v1.30 to v1.36 (Cluster API v1.13), further bounded by the k3s or k0s version the chosen Kairos image ships. |
 | Kairos | v4.1.2 (the v4.x line) |
 | Distribution | k3s and k0s. Both have fleet providerID self-discovery; k3s is the reference path and the most exercised (see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#providerid)). |
-| AuroraBoot | Fleet API (`/api/v1`): group claim, node get, apply-cloud-config, reboot, release. |
+| AuroraBoot | Fleet API (`/api/v1`): group list and claim, node get, the apply-cloud-config and reboot node commands and their outcome, release. |
 | Provider API | v1alpha1 (`infrastructure.cluster.x-k8s.io`) |
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full version

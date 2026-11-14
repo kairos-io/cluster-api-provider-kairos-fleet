@@ -1,6 +1,6 @@
 # Architecture
 
-> Last verified against: cluster-api-provider-kairos-fleet v0.1.3,
+> Last verified against: cluster-api-provider-kairos-fleet v0.1.4,
 > Cluster API v1.13.4 (v1beta2 contract), Kairos v4.1.2.
 
 This is the public overview of how the Kairos Fleet infrastructure provider
@@ -58,10 +58,11 @@ to re-run from any point:
 | Step | Condition to advance | What happens |
 | --- | --- | --- |
 | Wait for bootstrap | `Machine.spec.bootstrap.dataSecretName` is not yet set | Requeue; `WaitingForBootstrapData`. |
+| Resolve the AuroraBoot connection | The `KairosFleetCluster` is missing, or its connection is unusable | Requeue with a reason that names the cause: `WaitingForClusterInfrastructure` (no `KairosFleetCluster` yet, or a Secret read that can clear on its own), `WaitingForAuroraBootSecret` (the admin-token Secret does not exist yet) or `AuroraBootConnectionIncomplete` (no `auroraboot.url`, or a Secret with no `token`, which needs an edit). The message names the cause and is also logged. None of these sets `status.failureReason`. Any other failure to read the `KairosFleetCluster` is returned as an error and retried with backoff. |
 | Claim | No `node-id` annotation yet | Resolve `spec.group` (a name or an ID) to the group's ID, then claim a node from it using the KairosFleetMachine's UID as the claim key, so a retried reconcile finds the same node instead of claiming a second one. The key is recorded in the `claim-key` annotation, because a UID does not survive `clusterctl move` or a backup and restore. A group that does not resolve requeues as `GroupNotFound`; no capacity in the resolved group requeues as `WaitingForCapacity`. Neither is an error. |
 | Apply cloud-config | Node claimed, config not yet applied | Fetch the bootstrap Secret's `value` key and hand it to AuroraBoot unmodified as an apply-cloud-config command. AuroraBoot stages the config to the node's `/oem` overlay; it does not reboot on its own. |
 | Reboot | The apply-cloud-config command reports `Completed` | Issue a reboot command and record both the time it was requested and the command's ID. |
-| Wait for rejoin | Reboot issued | Poll the node; it has rejoined once its phase is `Online` and its last heartbeat is newer than the recorded reboot time. Using heartbeat-after-reboot rather than a phase transition means a reconcile that misses the transient `Offline` window still detects the rejoin correctly. While it has not rejoined, read the reboot command back: a `Failed` or `Expired` reboot is retried like a rejected apply, because waiting for a boot the node refused to perform never ends. |
+| Wait for rejoin | Reboot issued | Poll the node; it has rejoined once its phase is `Online` and its last heartbeat is newer than the recorded reboot time. Using heartbeat-after-reboot rather than a phase transition means a reconcile that misses the transient `Offline` window still detects the rejoin correctly. While it has not rejoined but still reports `Online`, read the reboot command back: a `Failed` or `Expired` reboot is retried like a rejected apply, because waiting for a boot the node refused to perform never ends. A node that is not `Online` is left to finish rebooting. |
 | Provisioned | Rejoin confirmed | Set `status.addresses`, `spec.providerID`, `status.initialization.provisioned = true`, and the `Ready` condition. |
 | Delete | `deletionTimestamp` set | Release the claimed node back to its group using the recorded claim key, then remove the finalizer. If AuroraBoot refuses the release because the node is claimed by a different key (`ClaimMismatch`), the node is no longer this machine's to release, so the finalizer is removed and the node ID is logged; if no other machine owns the node, release it in AuroraBoot to return it to its group. Any other release error is retried. If the AuroraBoot connection cannot be resolved at all any more, the finalizer is still removed; see "Delete: release versus reset". |
 
@@ -69,25 +70,36 @@ A command that reports `Failed` or `Expired` during the apply-cloud-config
 step sets a `CloudConfigFailed` `Ready` condition and is not terminal: the
 controller clears the applied-config marker and re-issues a fresh
 apply-cloud-config command about once a minute, so fixing whatever rejected
-the command — most commonly the node's AuroraBoot phonehome policy, see
-[QUICKSTART.md](QUICKSTART.md) — unsticks the machine with no manual
+the command (most commonly the node's AuroraBoot phonehome policy, see
+[QUICKSTART.md](QUICKSTART.md)) unsticks the machine with no manual
 intervention. The reboot step behaves the same way, with a `RebootFailed`
 `Ready` condition: `reboot` is a separate command with its own entry in the
 node's `allowed_commands` policy, so a node that accepted the apply can still
-refuse the reboot. Only a terminal phase counts there. A reboot the node did
-accept usually never reports `Completed`, because the node goes down in the
-middle of running it, so the controller waits on the heartbeat rather than on
-the command for every non-terminal phase. A claimed node that disappears from AuroraBoot entirely is
-still a terminal failure: `status.failureReason` and `status.failureMessage`
-are set and the machine does not retry itself; delete and re-create the
-Machine to try again.
+refuse the reboot. Only a terminal phase counts there, and only while the node
+reports `Online`. A reboot the node did accept usually never reports
+`Completed`, because the node goes down in the middle of running it, so the
+controller waits on the heartbeat rather than on the command for every
+non-terminal phase. A node that is offline is most likely rebooting and cannot
+report on its own reboot, so a terminal phase seen then is not acted on.
 
-The `KairosFleetCluster` controller is simpler: it validates the AuroraBoot
-connection (the admin-token Secret must exist and hold a non-empty `token`
-key) and sets `status.initialization.provisioned = true` once
-`spec.controlPlaneEndpoint.host` is set. It owns no external infrastructure of
-its own, since nodes are claimed and released per machine, so its own delete
-path only removes its finalizer.
+The earliest time for the next attempt is recorded on the object, in the
+`retry-not-before` annotation, rather than left to a requeue delay. Clearing
+the command markers to allow the retry is itself an update to the object, and
+the controller's watch answers it with an immediate reconcile, so a requeue
+delay alone would not pace anything.
+
+A claimed node that disappears from AuroraBoot entirely is still a terminal
+failure: `status.failureReason` and `status.failureMessage` are set and the
+machine does not retry itself; delete and re-create the Machine to try again.
+
+The `KairosFleetCluster` controller is simpler. It checks that the
+AuroraBoot connection is complete (`spec.auroraboot.url` is set, and the
+admin-token Secret exists and holds a non-empty `token` key) without calling
+AuroraBoot, then sets `status.initialization.provisioned = true` once
+`spec.controlPlaneEndpoint.host` is set. Until then its `Ready` condition
+reason is `AuroraBootConnectionNotReady` or `WaitingForControlPlaneEndpoint`.
+It owns no external infrastructure of its own, since nodes are claimed and
+released per machine, so its own delete path only removes its finalizer.
 
 ## providerID
 
@@ -149,6 +161,12 @@ not a NotFound is different: it can clear on the next attempt, so the
 reconcile fails and retries instead of removing the finalizer and leaving the
 node claimed with nothing left to release it.
 
+Deletion goes ahead without reaching AuroraBoot when the `KairosFleetCluster`
+is gone, the admin-token Secret is gone, or the connection has no url or
+token. To have nodes returned to their groups, delete the Cluster rather than
+the `KairosFleetCluster`, and keep the admin-token Secret until the machines
+are gone. Release a node left claimed this way in AuroraBoot.
+
 ## AuroraBoot connection and RBAC
 
 The AuroraBoot admin bearer token lives in a Secret referenced by
@@ -163,8 +181,8 @@ The provider does not import AuroraBoot's own Go client module: doing so
 would pull a newer Kubernetes and controller-runtime toolchain than Cluster
 API v1.13 targets, dragging an unrelated dependency graph into the build.
 Instead it ships a small, dependency-free HTTP client for the handful of
-fleet endpoints it needs (claim, node get, apply-cloud-config, command list,
-reboot, release).
+fleet endpoints it needs (group list, claim, node get, the apply-cloud-config
+and reboot commands, command list, release).
 
 ## v0.1 limitations
 
@@ -181,7 +199,9 @@ reboot, release).
   constrains `MachineAddress.type` to `Hostname`, `InternalIP`, `ExternalIP`,
   `InternalDNS` and `ExternalDNS`, while AuroraBoot stores the type as a
   free-form string, so an address of any other type is dropped here rather than
-  passed through to a status the apiserver would reject. AuroraBoot's
+  passed through to a status the apiserver would reject. An empty address, or
+  one longer than the 256 characters Cluster API accepts, is dropped for the
+  same reason, and an exact repeat is listed once. AuroraBoot's
   server-observed `remoteIP` is not surfaced: it is what the server saw the node
   connect from, not an address the node claims, and it can be a NAT gateway.
 - **The control-plane endpoint is operator-supplied.** There is no VIP or

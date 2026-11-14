@@ -1,6 +1,6 @@
 # Install
 
-> Last verified against: cluster-api-provider-kairos-fleet v0.1.3,
+> Last verified against: cluster-api-provider-kairos-fleet v0.1.4,
 > Cluster API v1.13.4 (v1beta2 contract), release pipeline in
 > `.github/workflows/release.yml`.
 
@@ -22,11 +22,11 @@ built-in provider list, so it needs a one-time `clusterctl.yaml` entry before
   to `github.com`, to fetch the release assets, or a local/air-gapped
   clusterctl override repository if you mirror releases internally.
 - AuroraBoot nodes enrolled with a `phonehome.allowed_commands` policy that
-  permits `apply-cloud-config`, `reboot`, and `reset`. AuroraBoot's
-  install-agent enrolment script defaults to a narrower policy
-  (`upgrade,upgrade-recovery,reboot,unregister`) that rejects the commands
-  this provider issues, which fails a node's very first bootstrap apply. This
-  is the most common first-run failure. See
+  permits `apply-cloud-config` and `reboot`, the two node commands this
+  provider issues. AuroraBoot's install-agent enrolment script defaults to
+  `upgrade,upgrade-recovery,reboot,unregister`, which lacks
+  `apply-cloud-config`, so a node enrolled with the default fails its very
+  first bootstrap apply. This is the most common first-run failure. See
   [QUICKSTART.md](QUICKSTART.md#auroraboot-node-enrolment-prerequisite) for
   both ways to set this, and how to fix an already-enrolled node.
 
@@ -39,7 +39,7 @@ assets:
 ```yaml
 providers:
   - name: "kairos-fleet"
-    url: "https://github.com/kairos-io/cluster-api-provider-kairos-fleet/releases/latest/download/infrastructure-components.yaml"
+    url: "https://github.com/kairos-io/cluster-api-provider-kairos-fleet/releases/latest/infrastructure-components.yaml"
     type: "InfrastructureProvider"
 ```
 
@@ -49,8 +49,16 @@ alongside each other in the same release: `infrastructure-components.yaml`
 `metadata.yaml` (the clusterctl contract and version-series mapping), and
 `cluster-template.yaml` (the default `clusterctl generate cluster` template).
 Point `url` at a specific tag instead of `latest` to pin a version, for
-example `.../releases/download/v0.1.3/infrastructure-components.yaml`. Do not
-pin `v0.1.0-beta.1`: it is superseded and is not installable through
+example `.../releases/v0.1.4/infrastructure-components.yaml`.
+
+This is clusterctl's URL form, not a browser download link: there is no
+`download/` segment. clusterctl reads the path as
+`releases/<version>/<file>`. With a `download/` segment it still works
+through its default HTTP download, but with `GOPROXY=off` or `direct` it
+falls back to the GitHub API, looks for an asset named
+`download/infrastructure-components.yaml`, and fails.
+
+Do not pin `v0.1.0-beta.1`: it is superseded and is not installable through
 `clusterctl init` at all (see
 [docs/release-notes/v0.1.0.md](release-notes/v0.1.0.md)).
 

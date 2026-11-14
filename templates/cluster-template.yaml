@@ -11,15 +11,18 @@
 # Kairos control-plane provider (KairosControlPlane). Install all three with
 # `clusterctl init`. Nodes are claimed from AuroraBoot groups.
 #
-# Two Secrets must exist in the cluster's namespace before this is applied:
-#   - the AuroraBoot admin token (AURORABOOT_TOKEN_SECRET, key `token`);
+# The cluster needs two Secrets in its namespace:
+#   - the AuroraBoot admin token (AURORABOOT_TOKEN_SECRET, key `token`), before
+#     this is applied;
 #   - the worker join token (K3S_TOKEN_SECRET_NAME, key `token`), whose value is
-#     /var/lib/rancher/k3s/server/token read from the control-plane node.
+#     /var/lib/rancher/k3s/server/token read from the control-plane node. Create
+#     it once that node is up; workers wait at WaitingForBootstrapData until then.
 #
-# Every node claimed for this cluster must also permit the commands the provider
-# issues. AuroraBoot's install-agent defaults do NOT include apply-cloud-config,
-# and a node enrolled with those defaults fails its first bootstrap apply; enrol
-# with AURORABOOT_ALLOWED_COMMANDS covering apply-cloud-config, reboot and reset.
+# Every node claimed for this cluster must also permit the two commands the
+# provider issues, apply-cloud-config and reboot. AuroraBoot's install-agent
+# defaults do NOT include apply-cloud-config, and a node enrolled with those
+# defaults fails its first bootstrap apply; enrol with
+# AURORABOOT_ALLOWED_COMMANDS covering apply-cloud-config and reboot.
 #
 # This example uses k3s, the reference path. For k0s set distribution to k0s on
 # the KairosControlPlane and both KairosConfigTemplates, and swap the worker's
