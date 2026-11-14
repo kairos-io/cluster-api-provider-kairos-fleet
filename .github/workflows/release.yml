@@ -41,9 +41,11 @@ jobs:
   # so a change to an osv-scanner.toml wants review on its own.
   #
   # What it does not cover: findings the scanner's Go call analysis marks as
-  # uncalled do not fail it, the Go standard library is not checked (test.yml's
-  # govulncheck covers it on main and pull requests), and the image's OS
-  # packages are not scanned.
+  # uncalled do not fail it, the Go standard library is not checked, and the
+  # image's OS packages are not scanned. test.yml's govulncheck checks the
+  # standard library of the runner's latest Go 1.27.x on main and pull
+  # requests, which can be newer than the toolchain in the digest-pinned
+  # builder image that compiles the shipped binary.
   #
   # The action is called directly, not through the reusable workflow, and
   # without continue-on-error, so a finding and a scanner error both fail the
@@ -132,6 +134,10 @@ jobs:
 
       - name: Set up Buildx
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+        with:
+          # Same reason again. The runner image ships buildx, so this cache is
+          # not reached today; keep it that way if that or the version changes.
+          cache-binary: false
 
       - name: Log in to ghcr.io
         uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
