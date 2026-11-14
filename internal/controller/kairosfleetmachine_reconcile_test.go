@@ -1126,3 +1126,72 @@ func TestMachineReconcile_WaitsOnATransientSecretReadError(t *testing.T) {
 	}
 	assertNotReady(t, c, reasonWaitingForClusterInfrastructure, "etcd leader election")
 }
+
+// status.initialization.provisioned latches: Cluster API ignores a provisioned
+// machine flipping back, so a node that later goes away is reported through the
+// Ready condition only.
+func TestMachineReconcile_ProvisionedStaysTrueWhenTheNodeGoesOffline(t *testing.T) {
+	hb := time.Now().Add(time.Hour)
+	phase := fleet.PhaseOnline
+	fc := &fleet.FakeClient{
+		ClaimFunc: func(_ context.Context, _, _ string) (*fleet.Node, error) {
+			return &fleet.Node{ID: testNodeID, Hostname: testHostname, Phase: fleet.PhaseOnline}, nil
+		},
+		GetNodeFunc: func(_ context.Context, _ string) (*fleet.Node, error) {
+			return &fleet.Node{ID: testNodeID, Hostname: testHostname, Phase: phase, LastHeartbeat: &hb}, nil
+		},
+		GetCommandsFunc: func(_ context.Context, _ string) ([]fleet.Command, error) {
+			return []fleet.Command{{ID: fakeApplyCommandID, Command: fleet.CommandApplyCloudConfig, Phase: fleet.CommandPhaseCompleted}}, nil
+		},
+	}
+	r, c := newReconciler(t, fc, testFixture(true))
+
+	reconcileKFM(t, r) // claim
+	reconcileKFM(t, r) // apply
+	reconcileKFM(t, r) // reboot
+	reconcileKFM(t, r) // provisioned
+	if !ptr.Deref(getKFM(t, c).Status.Initialization.Provisioned, false) {
+		t.Fatalf("precondition: expected provisioned=true")
+	}
+
+	phase = fleet.PhaseOffline
+	reconcileKFM(t, r)
+
+	kfm := getKFM(t, c)
+	if !ptr.Deref(kfm.Status.Initialization.Provisioned, false) {
+		t.Fatalf("provisioned flipped back to false; it must stay true once reported")
+	}
+	ready := meta.FindStatusCondition(kfm.Status.Conditions, clusterv1.ReadyCondition)
+	if ready == nil || ready.Status != metav1.ConditionFalse || ready.Reason != "WaitingForNodeRejoin" {
+		t.Fatalf("expected Ready=False/WaitingForNodeRejoin, got %+v", ready)
+	}
+}
+
+func TestMachineReconcile_NeverProvisionedMachineReportsFalseWhileWaiting(t *testing.T) {
+	fc := &fleet.FakeClient{
+		ClaimFunc: func(_ context.Context, _, _ string) (*fleet.Node, error) {
+			return &fleet.Node{ID: testNodeID, Hostname: testHostname, Phase: fleet.PhaseOnline}, nil
+		},
+		GetNodeFunc: func(_ context.Context, _ string) (*fleet.Node, error) {
+			return &fleet.Node{ID: testNodeID, Hostname: testHostname, Phase: fleet.PhaseOffline}, nil
+		},
+		GetCommandsFunc: func(_ context.Context, _ string) ([]fleet.Command, error) {
+			return []fleet.Command{{ID: fakeApplyCommandID, Command: fleet.CommandApplyCloudConfig, Phase: fleet.CommandPhaseCompleted}}, nil
+		},
+	}
+	r, c := newReconciler(t, fc, testFixture(true))
+
+	reconcileKFM(t, r) // claim
+	reconcileKFM(t, r) // apply
+	reconcileKFM(t, r) // reboot
+	reconcileKFM(t, r) // waiting for rejoin
+
+	kfm := getKFM(t, c)
+	if kfm.Status.Initialization.Provisioned == nil || *kfm.Status.Initialization.Provisioned {
+		t.Fatalf("expected provisioned=false while waiting, got %v", kfm.Status.Initialization.Provisioned)
+	}
+	ready := meta.FindStatusCondition(kfm.Status.Conditions, clusterv1.ReadyCondition)
+	if ready == nil || ready.Reason != "WaitingForNodeRejoin" {
+		t.Fatalf("expected WaitingForNodeRejoin, got %+v", ready)
+	}
+}
