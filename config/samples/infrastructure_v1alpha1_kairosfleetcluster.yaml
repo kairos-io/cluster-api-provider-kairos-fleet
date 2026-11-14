@@ -16,9 +16,12 @@
 #         --from-literal=token="$AURORABOOT_ADMIN_TOKEN"
 #     Do not commit the token value to a manifest.
 #   - This resource is normally created by clusterctl generate cluster (see
-#     docs/QUICKSTART.md), owned by a CAPI Cluster. Applying it standalone,
-#     as below, is useful to test the AuroraBoot connection in isolation; it
-#     will not be adopted by a Cluster unless one references it by name.
+#     docs/QUICKSTART.md) and referenced by a CAPI Cluster through
+#     spec.infrastructureRef; the Cluster controller then sets the owner
+#     reference. The KairosFleetCluster controller takes no action on an
+#     object with no owning Cluster (no finalizer, no status, and the
+#     AuroraBoot connection is not checked), so applying it standalone, as
+#     below, only creates the object. It is useful for validating the schema.
 apiVersion: infrastructure.cluster.x-k8s.io/v1alpha1
 kind: KairosFleetCluster
 metadata:
@@ -29,7 +32,7 @@ metadata:
 spec:
   # Operator-supplied control-plane endpoint (a kube-vip VIP or a managed
   # load balancer). This provider does not allocate it;
-  # status.initialization.provisioned stays false until it is set.
+  # status.initialization.provisioned is not set to true until it is set.
   controlPlaneEndpoint:
     host: 203.0.113.10
     port: 6443

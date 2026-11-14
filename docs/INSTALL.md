@@ -1,23 +1,27 @@
 # Install
 
 > Last verified against: cluster-api-provider-kairos-fleet v0.1.4,
-> Cluster API v1.13.4 (v1beta2 contract), release pipeline in
-> `.github/workflows/release.yml`.
+> Cluster API v1.13.4 (v1beta2 contract), clusterctl v1.13.4, release
+> pipeline in `.github/workflows/release.yml`.
 
 This registers the Kairos Fleet infrastructure provider with `clusterctl` and
-installs it into a management cluster. `kairos-fleet` is not in `clusterctl`'s
-built-in provider list, so it needs a one-time `clusterctl.yaml` entry before
-`clusterctl init` can find it.
+installs it into a management cluster. The provider's `clusterctl` name is
+`kairos-io-fleet`. It is not in the built-in provider list of `clusterctl`
+v1.13 or v1.14, so with those versions it needs a one-time `clusterctl.yaml`
+entry before `clusterctl init` can find it. `clusterctl` v1.15 knows
+`kairos-io-fleet` built in (first present in v1.15.0-beta.0), so the entry is
+not needed there.
 
 ## Prerequisites
 
 - A management cluster running a supported Kubernetes version: v1.32 to v1.36
-  (the Cluster API v1.13 range), built and tested against v1.34 to v1.35. See
-  the version table in [../README.md](../README.md#target-versions).
+  (the Cluster API v1.13 range). See the version table, including what the
+  tests run against, in [../README.md](../README.md#target-versions).
 - `clusterctl`, matching Cluster API v1.13.
 - Cluster API core components and the Kairos bootstrap and control-plane
-  providers (from `cluster-api-provider-kairos`), either already installed or
-  installed in the same `clusterctl init` call below.
+  providers (from `cluster-api-provider-kairos`, `clusterctl` name
+  `kairos-io`), either already installed or installed in the same
+  `clusterctl init` call below.
 - Network access from your workstation (or wherever `clusterctl init` runs)
   to `github.com`, to fetch the release assets, or a local/air-gapped
   clusterctl override repository if you mirror releases internally.
@@ -33,12 +37,13 @@ built-in provider list, so it needs a one-time `clusterctl.yaml` entry before
 ## 1. Register the provider with clusterctl
 
 Add a `providers` entry to your `clusterctl.yaml` (default location
-`~/.cluster-api/clusterctl.yaml`), pointing at this repository's release
-assets:
+`$XDG_CONFIG_HOME/cluster-api/clusterctl.yaml` or
+`~/.cluster-api/clusterctl.yaml`, or pass `--config`), pointing at this
+repository's release assets:
 
 ```yaml
 providers:
-  - name: "kairos-fleet"
+  - name: "kairos-io-fleet"
     url: "https://github.com/kairos-io/cluster-api-provider-kairos-fleet/releases/latest/infrastructure-components.yaml"
     type: "InfrastructureProvider"
 ```
@@ -48,7 +53,8 @@ alongside each other in the same release: `infrastructure-components.yaml`
 (the CRDs, RBAC, and controller Deployment, with the image pinned by digest),
 `metadata.yaml` (the clusterctl contract and version-series mapping), and
 `cluster-template.yaml` (the default `clusterctl generate cluster` template).
-Point `url` at a specific tag instead of `latest` to pin a version, for
+The release also carries an SBOM, `sbom.spdx.json`, which clusterctl does not
+read. Point `url` at a specific tag instead of `latest` to pin a version, for
 example `.../releases/v0.1.4/infrastructure-components.yaml`.
 
 This is clusterctl's URL form, not a browser download link: there is no
@@ -60,24 +66,24 @@ falls back to the GitHub API, looks for an asset named
 
 Do not pin `v0.1.0-beta.1`: it is superseded and is not installable through
 `clusterctl init` at all (see
-[docs/release-notes/v0.1.0.md](release-notes/v0.1.0.md)).
+[the v0.1.0 release notes](release-notes/v0.1.0.md)).
 
 ## 2. Initialize the management cluster
 
 ```bash
 clusterctl init \
-  --infrastructure kairos-fleet \
-  --bootstrap kairos \
-  --control-plane kairos
+  --infrastructure kairos-io-fleet \
+  --bootstrap kairos-io \
+  --control-plane kairos-io
 ```
 
 This installs the Cluster API core provider (if not already present), this
 infrastructure provider, and the Kairos bootstrap and control-plane
-providers. The `kairos` short name above assumes the sibling providers from
-`cluster-api-provider-kairos` are registered under that name in your
-`clusterctl.yaml`; if you registered them under a different name, use that
-name instead, and consult that repository's own installation docs for its
-`clusterctl.yaml` entry.
+providers. `kairos-io` is the `clusterctl` name of the bootstrap and
+control-plane providers from `cluster-api-provider-kairos`. With `clusterctl`
+v1.13 or v1.14 those two also need `clusterctl.yaml` entries; that repository's
+installation docs give them. If you registered them under a different name,
+use that name instead.
 
 ## 3. Verify the deployment
 
@@ -99,8 +105,15 @@ kubectl get deployment -n capi-kairos-fleet-system \
 ## Uninstall
 
 ```bash
-clusterctl delete --infrastructure kairos-fleet
+clusterctl delete --infrastructure kairos-io-fleet
 ```
+
+`clusterctl` finds the provider's objects by the label
+`cluster.x-k8s.io/provider: infrastructure-kairos-io-fleet`, which the release
+manifest stamps on every component. By default it removes the controller and
+RBAC but keeps the CRDs and the `capi-kairos-fleet-system` namespace; add
+`--include-crd` and `--include-namespace` to remove those too, which also
+deletes every `KairosFleet*` object.
 
 This does not release AuroraBoot nodes claimed by existing
 KairosFleetMachines: delete the Clusters first (see

@@ -9,7 +9,7 @@ Requires Go 1.26 or newer, the `go` directive in `go.mod`; CI and the release
 image build with Go 1.27. Clone the repository and use the `Makefile` targets:
 
 ```bash
-make manifests   # regenerate CRDs, RBAC, and webhook config from kubebuilder markers
+make manifests   # regenerate CRDs and RBAC from kubebuilder markers
 make generate    # regenerate DeepCopy/DeepCopyInto/DeepCopyObject
 make fmt vet     # go fmt, go vet
 make test        # unit tests + envtest (downloads envtest binaries automatically)
@@ -42,14 +42,19 @@ source change.
   Go standard library or the runtime base image's OS packages.
 - **Lint**: `golangci-lint` v2.15.0 on Go 1.27, configured in `.golangci.yml`.
 - **End-to-end** (`make test-e2e`): the current suite is the kubebuilder
-  scaffold placeholder; it deploys the manager to a kind cluster and checks it
-  starts. It runs on manual `workflow_dispatch` only in CI and does not gate
-  pull requests. Validating the fleet flow against real AuroraBoot-enrolled
-  Kairos nodes is a manual lab procedure.
+  scaffold placeholder; it builds the manager image, loads it into a kind
+  cluster, installs cert-manager, and checks that the manager starts and serves
+  metrics. It needs an existing kind cluster. In CI it runs on manual
+  `workflow_dispatch` only, on kind v0.32.0 with its default node image
+  (Kubernetes v1.36.1), and does not gate pull requests. Validating the fleet
+  flow against real AuroraBoot-enrolled Kairos nodes is a manual lab
+  procedure.
 
-Pull requests are gated by the `Tests` workflow (unit tests, envtest,
-govulncheck), the `Lint` workflow and the `OSV-Scanner` workflow. All must pass
-before merge.
+The `Tests` workflow (unit tests, envtest, govulncheck), the `Lint` workflow
+and the `OSV-Scanner` workflow run on every pull request. The `main` branch
+ruleset requires a pull request with one approving review; it does not list
+required status checks, so a failing workflow is not enforced as a merge
+block by repository settings.
 
 Dependency updates come from Renovate, configured in `renovate.json`. Its
 commits carry a `Signed-off-by` trailer so they satisfy the DCO check.
@@ -57,20 +62,23 @@ commits carry a `Signed-off-by` trailer so they satisfy the DCO check.
 ## Releases
 
 Pushing a `v*` tag runs `.github/workflows/release.yml`. It starts with an
-OSV scan of the tagged tree, and any finding stops the release before
-anything is built or signed. It then builds and signs the multi-arch image,
+OSV scan of the tagged tree, and a finding the scanner fails on stops the
+release before anything is built or signed (findings the scanner marks as
+uncalled do not). It then builds and signs the multi-arch image,
 generates an SBOM, and publishes a GitHub release carrying
-`infrastructure-components.yaml` (image pinned by digest), `metadata.yaml`
-and `cluster-template.yaml`. The release body is
+`infrastructure-components.yaml` (image pinned by digest), `metadata.yaml`,
+`cluster-template.yaml` and `sbom.spdx.json`. The release body is
 `docs/release-notes/<tag>.md`, which must exist at the tagged commit or the
-release fails. A tag containing `-` is published as a prerelease.
+release fails; GitHub's generated "What's Changed" list is appended to it. A
+tag containing `-` is published as a prerelease.
 
 ## Commit policy
 
 - **Conventional Commits**: `feat:`, `fix:`, `chore:`, `refactor:`, `test:`,
   `docs:`, `ci:`, `build:`, `perf:`.
 - **DCO sign-off is required on every commit**: use `git commit -s`, which
-  appends a `Signed-off-by:` trailer. Commits without it are rejected.
+  appends a `Signed-off-by:` trailer. The DCO check fails on a commit
+  without it.
 - **No AI attribution trailers.** Do not add `Co-Authored-By: Claude` or
   similar; a commit is attributed to its human author.
 

@@ -2,21 +2,27 @@
 #
 # Render with:
 #   clusterctl generate cluster <name> \
-#     --infrastructure kairos-fleet \
+#     --infrastructure kairos-io-fleet \
 #     --kubernetes-version v1.34.0 \
 #     --control-plane-machine-count 1 --worker-machine-count 1 > cluster.yaml
 #
 # A fleet cluster composes three providers: this infrastructure provider
 # (KairosFleet*), the Kairos bootstrap provider (KairosConfigTemplate), and the
 # Kairos control-plane provider (KairosControlPlane). Install all three with
-# `clusterctl init`. Nodes are claimed from AuroraBoot groups.
+# `clusterctl init`; see docs/INSTALL.md in the provider repository. With
+# clusterctl v1.13 or v1.14 the kairos-io-fleet provider name must first be
+# registered in clusterctl.yaml (same page). Nodes are claimed from AuroraBoot
+# groups.
 #
 # The cluster needs two Secrets in its namespace:
 #   - the AuroraBoot admin token (AURORABOOT_TOKEN_SECRET, key `token`), before
 #     this is applied;
-#   - the worker join token (K3S_TOKEN_SECRET_NAME, key `token`), whose value is
+#   - the k3s server token the worker KairosConfigTemplate references
+#     (K3S_TOKEN_SECRET_NAME, key `token`), whose value is
 #     /var/lib/rancher/k3s/server/token read from the control-plane node. Create
-#     it once that node is up; workers wait at WaitingForBootstrapData until then.
+#     it once that node is up (docs/QUICKSTART.md, step 5). A worker's
+#     KairosFleetMachine stays at WaitingForBootstrapData until its Machine has
+#     spec.bootstrap.dataSecretName set.
 #
 # Every node claimed for this cluster must also permit the two commands the
 # provider issues, apply-cloud-config and reboot. AuroraBoot's install-agent
@@ -137,9 +143,8 @@ metadata:
 spec:
   template:
     spec:
-      # A worker needs an explicit role and a join token. Without the token the
-      # Kairos bootstrap webhook rejects every clone of this template, so the
-      # MachineDeployment can never create a Machine.
+      # Worker role, with the join token read from the Secret named by
+      # K3S_TOKEN_SECRET_NAME (see the header and docs/QUICKSTART.md, step 5).
       role: worker
       distribution: k3s
       k3sTokenSecretRef:
