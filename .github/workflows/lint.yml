@@ -23,15 +23,14 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          # Pinned to 1.26 while the other workflows are on 1.27, and it is
-          # golangci-lint that pins it: the linter parses the standard library
-          # of whatever Go is installed, and panics on sources newer than the
-          # Go it was itself built with —
+          # Go 1.27, matching the other workflows. golangci-lint parses the
+          # standard library of whatever Go is installed and panics on sources
+          # newer than the Go it was itself built with —
           #   panic: file requires newer Go version go1.27
           #          (application built with go1.26)
-          # v2.12.2 is built on go 1.25.0 and even v2.13.2 (2026-08-27) on
-          # go 1.26.0, so no released version can lint against a 1.27 stdlib.
-          # Raise this only together with a golangci-lint built on 1.27+.
+          # so the linter must be built on 1.27+; golangci-lint v2.15.0 is, and
+          # it runs on this Go. go.mod's go directive stays at 1.26.0.
+          # Lower this only if the linter is pinned to a build older than 1.27.
           go-version: "1.27"
           check-latest: true
 
