@@ -25,7 +25,7 @@ jobs:
         with:
           # Go 1.27, matching the other workflows. golangci-lint parses the
           # standard library of whatever Go is installed and panics on sources
-          # newer than the Go it was itself built with —
+          # newer than the Go it was itself built with:
           #   panic: file requires newer Go version go1.27
           #          (application built with go1.26)
           # so the linter must be built on 1.27+; golangci-lint v2.15.0 is, and
