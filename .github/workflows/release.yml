@@ -1,9 +1,10 @@
 name: Release
 
-# Tagging vX.Y.Z builds and pushes a multi-arch image, signs it keylessly with
-# cosign, attaches an SBOM + provenance, and publishes a GitHub release with the
-# clusterctl assets (infrastructure-components.yaml pinned to the image digest,
-# metadata.yaml, cluster-template.yaml).
+# Tagging vX.Y.Z first scans the tagged tree for known vulnerabilities and
+# stops if any are open. It then builds and pushes a multi-arch image, signs it
+# keylessly with cosign, attaches an SBOM + provenance, and publishes a GitHub
+# release with the clusterctl assets (infrastructure-components.yaml pinned to
+# the image digest, metadata.yaml, cluster-template.yaml).
 on:
   push:
     tags:
@@ -21,8 +22,70 @@ env:
   IMAGE_NAME: ${{ github.repository }}
 
 jobs:
+  # A tag push matches none of osv-scanner.yml's triggers (pull_request, push to
+  # main, the Monday cron), and that workflow is the only whole-tree scan in the
+  # repository. Without this job a release cut between two Mondays can publish
+  # while an advisory is already open against an unchanged dependency, with
+  # nothing red anywhere.
+  #
+  # The scanner is the one osv-scanner.yml runs: its reusable workflows, pinned
+  # at b1d267ae (v2.7.0), call google/osv-scanner-action at the SHA pinned below,
+  # with the same default arguments ("-r ./"). Bump the two pins together. If an
+  # osv-scanner.toml is ever added, pass it as --config here and there in the
+  # same change, so the two scans cannot disagree about what is ignored.
+  #
+  # The scan reads the tagged tree, not main: the release is what ships.
+  #
+  # The action is called directly, not through the reusable workflow, and
+  # without continue-on-error, so a finding and a scanner error both fail the
+  # job: an osv.dev outage, a network failure or a malformed config cannot let a
+  # tag through on a green gate. The scanner image maps "no package sources
+  # found" to success, so the scan also writes its results to a file, and the
+  # next step fails the gate when that file is missing or is not a scan result:
+  # a scan that read nothing passes nothing.
+  #
+  # No SARIF upload, so no security-events: write. osv-scanner.yml owns the
+  # Security > Code scanning view, keyed on main.
+  osv:
+    name: osv-scan (release gate)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout the tagged tree
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Scan for known vulnerabilities
+        uses: google/osv-scanner-action/osv-scanner-action@0a65f82af05cd58cf587827b0bb0489548c18346 # v2.7.0
+        with:
+          scan-args: |-
+            --format=json
+            --output=osv-results.json
+            -r
+            ./
+
+      - name: Require scan results
+        if: ${{ !cancelled() }}
+        run: |
+          if [ ! -s osv-results.json ]; then
+            echo "::error::The OSV scan produced no results file, so it scanned nothing. Refusing to release."
+            exit 1
+          fi
+          # A completed scan always writes a JSON document with a "results"
+          # array (empty when nothing is vulnerable). "No package sources
+          # found" writes no file at all, which the check above catches.
+          if ! jq -e 'has("results")' osv-results.json >/dev/null; then
+            echo "::error::The OSV results file is not a scan result. Refusing to release."
+            exit 1
+          fi
+          vulns=$(jq '[.results[]?.packages[]?.vulnerabilities[]?] | length' osv-results.json)
+          echo "OSV scan completed; ${vulns} unignored vulnerability record(s) in the results."
+
   release:
     name: Build, sign and publish
+    needs: osv
     runs-on: ubuntu-latest
     permissions:
       contents: write # create the GitHub release
