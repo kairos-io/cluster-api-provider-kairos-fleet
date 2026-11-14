@@ -1,11 +1,14 @@
 # Architecture
 
-> Last verified against: cluster-api-provider-kairos-fleet v0.1.4,
-> Cluster API v1.13.4 (v1beta2 contract), Kairos v4.1.2.
+> Last verified against: cluster-api-provider-kairos-fleet v0.1.4 (code at
+> the v0.1.4 tag), Cluster API v1.13.4 (v1beta2 contract), Kairos v4.1.2.
 
-This is the public overview of how the Kairos Fleet infrastructure provider
-works: the fleet model, the four CRDs, the machine lifecycle, the providerID
-contract, and the current (v0.1) limitations.
+This is the overview of how the Kairos Fleet infrastructure provider works:
+the fleet model, the four CRDs, the machine lifecycle, the providerID
+contract with the node, and the current (v0.1) limitations. It describes this
+provider only. The Kairos bootstrap and control-plane providers are separate
+projects with their own documentation; this provider relies on two things from
+them, stated in the "Contracts with the other providers" section.
 
 ## The fleet model versus a cloud infrastructure provider
 
@@ -57,14 +60,19 @@ to re-run from any point:
 
 | Step | Condition to advance | What happens |
 | --- | --- | --- |
-| Wait for bootstrap | `Machine.spec.bootstrap.dataSecretName` is not yet set | Requeue; `WaitingForBootstrapData`. |
-| Resolve the AuroraBoot connection | The `KairosFleetCluster` is missing, or its connection is unusable | Requeue with a reason that names the cause: `WaitingForClusterInfrastructure` (no `KairosFleetCluster` yet, or a Secret read that can clear on its own), `WaitingForAuroraBootSecret` (the admin-token Secret does not exist yet) or `AuroraBootConnectionIncomplete` (no `auroraboot.url`, or a Secret with no `token`, which needs an edit). The message names the cause and is also logged. None of these sets `status.failureReason`. Any other failure to read the `KairosFleetCluster` is returned as an error and retried with backoff. |
-| Claim | No `node-id` annotation yet | Resolve `spec.group` (a name or an ID) to the group's ID, then claim a node from it using the KairosFleetMachine's UID as the claim key, so a retried reconcile finds the same node instead of claiming a second one. The key is recorded in the `claim-key` annotation, because a UID does not survive `clusterctl move` or a backup and restore. A group that does not resolve requeues as `GroupNotFound`; no capacity in the resolved group requeues as `WaitingForCapacity`. Neither is an error. |
-| Apply cloud-config | Node claimed, config not yet applied | Fetch the bootstrap Secret's `value` key and hand it to AuroraBoot unmodified as an apply-cloud-config command. AuroraBoot stages the config to the node's `/oem` overlay; it does not reboot on its own. |
+| Wait for bootstrap | `Machine.spec.bootstrap.dataSecretName` is not yet set | `WaitingForBootstrapData`. No requeue is scheduled; the watch on the owning `Machine` reconciles again when the field is set. |
+| Resolve the AuroraBoot connection | The `KairosFleetCluster` is missing, or its connection is unusable | Requeue (15 seconds when the `KairosFleetCluster` is missing, otherwise 30 seconds) with a reason that names the cause: `WaitingForClusterInfrastructure` (no `KairosFleetCluster` yet, or a Secret read that can clear on its own), `WaitingForAuroraBootSecret` (the admin-token Secret does not exist yet) or `AuroraBootConnectionIncomplete` (no `auroraboot.url`, or a Secret with no `token`, which needs an edit). The message names the cause and is also logged. None of these sets `status.failureReason`. Any other failure to read the `KairosFleetCluster` is returned as an error and retried with backoff. |
+| Claim | No `node-id` annotation yet | Resolve `spec.group` (a name or an ID) to the group's ID, then claim a node from it using the KairosFleetMachine's UID as the claim key, so a retried reconcile finds the same node instead of claiming a second one. The key is recorded in the `claim-key` annotation, because a UID does not survive `clusterctl move` or a backup and restore. A group that does not resolve requeues (30 seconds) as `GroupNotFound`; no capacity in the resolved group requeues (30 seconds) as `WaitingForCapacity`. Neither is an error. Any other failure of the group or claim call is returned as an error and retried with backoff. |
+| Apply cloud-config | Node claimed, config not yet applied | Read the `value` key of the Secret named by `Machine.spec.bootstrap.dataSecretName` and hand it to AuroraBoot unmodified as an apply-cloud-config command. AuroraBoot stages the config on the node under `/oem`; it does not reboot on its own. A Secret that is missing or has no `value` key is returned as an error and retried with backoff. |
 | Reboot | The apply-cloud-config command reports `Completed` | Issue a reboot command and record both the time it was requested and the command's ID. |
 | Wait for rejoin | Reboot issued | Poll the node; it has rejoined once its phase is `Online` and its last heartbeat is newer than the recorded reboot time. Using heartbeat-after-reboot rather than a phase transition means a reconcile that misses the transient `Offline` window still detects the rejoin correctly. While it has not rejoined but still reports `Online`, read the reboot command back: a `Failed` or `Expired` reboot is retried like a rejected apply, because waiting for a boot the node refused to perform never ends. A node that is not `Online` is left to finish rebooting. |
 | Provisioned | Rejoin confirmed | Set `status.addresses`, `spec.providerID`, `status.initialization.provisioned = true`, and the `Ready` condition. |
-| Delete | `deletionTimestamp` set | Release the claimed node back to its group using the recorded claim key, then remove the finalizer. If AuroraBoot refuses the release because the node is claimed by a different key (`ClaimMismatch`), the node is no longer this machine's to release, so the finalizer is removed and the node ID is logged; if no other machine owns the node, release it in AuroraBoot to return it to its group. Any other release error is retried. If the AuroraBoot connection cannot be resolved at all any more, the finalizer is still removed; see "Delete: release versus reset". |
+| Delete | `deletionTimestamp` set | Release the claimed node back to its group using the recorded claim key, then remove the finalizer. A machine that never recorded a `node-id` has nothing to release. A node AuroraBoot no longer knows (404) is treated as already released. If AuroraBoot refuses the release because the node is claimed by a different key (`ClaimMismatch`), the node is no longer this machine's to release, so the finalizer is removed and the node ID is logged; if no other machine owns the node, release it in AuroraBoot to return it to its group. Any other release error is retried. If the AuroraBoot connection cannot be resolved at all any more, the finalizer is still removed; see "Delete: release versus reset". |
+
+A reconcile does nothing while the `Cluster` is paused (`spec.paused`) or the
+`KairosFleetMachine` carries the `cluster.x-k8s.io/paused` annotation. That
+includes a delete: a paused machine does not release its node until it is
+unpaused.
 
 A command that reports `Failed` or `Expired` during the apply-cloud-config
 step sets a `CloudConfigFailed` `Ready` condition and is not terminal: the
@@ -89,8 +97,16 @@ the controller's watch answers it with an immediate reconcile, so a requeue
 delay alone would not pace anything.
 
 A claimed node that disappears from AuroraBoot entirely is still a terminal
-failure: `status.failureReason` and `status.failureMessage` are set and the
-machine does not retry itself; delete and re-create the Machine to try again.
+failure: `status.failureReason` and `status.failureMessage` are set (reason
+`NodeMissing`) and the machine does not retry itself; delete and re-create the
+Machine to try again. The controller looks the node up at the rejoin step, so
+it notices the loss only once the reboot has been requested.
+
+The controller does not poll a machine once it is provisioned. It runs again
+on changes to the `KairosFleetMachine` or its `Machine`, and on the manager's
+periodic resync, and each run repeats the rejoin check. A run that finds the
+node no longer `Online` reports `WaitingForNodeRejoin` on the `Ready`
+condition.
 
 The `KairosFleetCluster` controller is simpler. It checks that the
 AuroraBoot connection is complete (`spec.auroraboot.url` is set, and the
@@ -104,53 +120,58 @@ released per machine, so its own delete path only removes its finalizer.
 ## providerID
 
 `spec.providerID` is set by the controller to `kairos-fleet://<auroraboot-node-id>`
-once a node is claimed and confirmed rejoined. Cluster API matches a
-`KairosFleetMachine` to its workload `Node` by this string, so the node's
-kubelet must report the identical value, and the value must be stable across
-reboots.
+once a node is claimed and confirmed rejoined. The node ID is the same value
+recorded in the `node-id` annotation. Cluster API matches a
+`KairosFleetMachine` to its workload `Node` by comparing this string with
+`Node.spec.providerID`.
 
-The node side of this match is a cross-provider contract: it lives in the
-Kairos bootstrap provider's rendered cloud-config, not in this repository.
-For k3s, the bootstrap provider writes a self-discovery script that runs
-before k3s starts. It reads the AuroraBoot node ID from the Kairos phone-home
-agent's persisted credentials file (written to the node's persistent state by
-the agent after enrollment) and writes it into a k3s kubelet argument
-drop-in as `provider-id=kairos-fleet://<node-id>`, so the kubelet registers
-with the exact string this controller set. This requires the node image to
-run the Kairos phone-home agent and to have already phoned home (so the
-credentials file exists) before k3s starts.
+The match depends on the node side. The node's kubelet must register with the
+providerID `kairos-fleet://<node-id>`, using the AuroraBoot node ID, and the
+value must be stable across reboots. This provider never configures the
+kubelet and never patches a workload `Node`. How the node arrives at that
+value is decided by the cloud-config in the bootstrap data, which another
+provider produces.
 
-k0s derives the same node ID from the phone-home credentials, but delivers it
-differently because k0s has no equivalent pre-start kubelet config drop-in. A
-k0s control-plane node patches its own `Node.spec.providerID` once the cluster
-is up, using the local admin kubeconfig. A k0s worker writes a
-`KubeletConfiguration` drop-in that the kubelet reads through a static config
-directory before it registers. Both paths produce the same
-`kairos-fleet://<node-id>` value. k3s is the reference path and the most
-exercised; prefer k3s if you do not have a specific reason to choose k0s.
+If the two values differ, or the `Node` has none, Cluster API does not link
+the `Machine` to the `Node`. To check, compare the `PROVIDERID` column of
+`kubectl get kairosfleetmachines` with the workload cluster's
+`kubectl get nodes -o custom-columns=NAME:.metadata.name,PROVIDERID:.spec.providerID`.
 
-This provider never patches a workload `Node`'s `spec.providerID` directly:
-doing so fights the kubelet and is fragile. It only sets the value on the
-`KairosFleetMachine` and relies on the node-side self-discovery to make the
-kubelet agree.
+## Contracts with the other providers
+
+A fleet cluster is assembled from three providers, and this one relies on
+exactly two things from the others:
+
+- The bootstrap data Secret named by `Machine.spec.bootstrap.dataSecretName`
+  holds the cloud-config under the `value` key. This provider applies that
+  value to the claimed node unmodified.
+- The node's kubelet registers with the providerID
+  `kairos-fleet://<node-id>`, stable across reboots (see "providerID" above).
+
+Anything else about the cloud-config, the node's Kubernetes distribution, or
+the control-plane lifecycle belongs to the Kairos bootstrap and control-plane
+providers, at
+[kairos-io/cluster-api-provider-kairos](https://github.com/kairos-io/cluster-api-provider-kairos).
 
 ## Control-plane endpoint
 
 For a fleet cluster, the control-plane endpoint is operator-supplied: set
 `KairosFleetCluster.spec.controlPlaneEndpoint` to a kube-vip VIP, a load
 balancer, or a DNS name you manage. This provider does not allocate or derive
-one. `status.initialization.provisioned` on the KairosFleetCluster stays
-false until it is set.
+one. The `KairosFleetCluster` does not report
+`status.initialization.provisioned: true` until the endpoint host is set.
 
 ## Delete: release versus reset
 
 Deleting a `KairosFleetMachine` releases its claimed node back to its
 AuroraBoot group's pool; the claim is cleared but the node is not wiped, so
 its next claim re-applies fresh bootstrap configuration. AuroraBoot also
-exposes a reset lifecycle (wipe-and-reuse), which is the more correct choice
-when a node must be scrubbed before reuse (multi-tenant handoff,
-decommissioning). This provider does not use it yet: v0.1 always releases. A
-`deletePolicy` field to opt into reset is a planned follow-up.
+defines a reset command (wipe-and-reuse), which would be the more correct
+choice when a node must be scrubbed before reuse (multi-tenant handoff,
+decommissioning). This provider never sends it: v0.1 always releases. A
+`deletePolicy` field to opt into reset is a planned follow-up. The release is
+a call to the AuroraBoot server, not a command to the node, so it needs no
+node permission.
 
 The release is best effort. The `KairosFleetCluster` removes its own finalizer
 as soon as it is deleted, so it and its admin-token Secret can already be gone
@@ -172,25 +193,28 @@ are gone. Release a node left claimed this way in AuroraBoot.
 The AuroraBoot admin bearer token lives in a Secret referenced by
 `KairosFleetCluster.spec.auroraboot.adminTokenSecretRef`, read from the
 Secret's `token` key. One connection is shared by every machine in the
-cluster. The controller's RBAC is scoped to its own CRDs (plus their `status`
-and `finalizers` subresources), read-only access to Cluster API `Clusters`
-and `Machines`, and read-only access to `Secrets`. The token is never written
-to logs.
+cluster. The controller's cluster-wide RBAC (`config/rbac/role.yaml`) covers
+`KairosFleetCluster` and `KairosFleetMachine` (plus their `status` and
+`finalizers` subresources; the two template kinds have no controller),
+read-only access to Cluster API `Clusters` and `Machines`, and read-only
+access to `Secrets` in every namespace. The controller does not log the
+token.
 
 The provider does not import AuroraBoot's own Go client module: doing so
 would pull a newer Kubernetes and controller-runtime toolchain than Cluster
 API v1.13 targets, dragging an unrelated dependency graph into the build.
 Instead it ships a small, dependency-free HTTP client for the handful of
-fleet endpoints it needs (group list, claim, node get, the apply-cloud-config
-and reboot commands, command list, release).
+fleet endpoints it needs: group list, claim, node get, queueing the
+apply-cloud-config and reboot commands, command list, and release. Each
+request has a 30 second timeout.
 
 ## v0.1 limitations
 
 - **The exercised topology is one control-plane machine plus a
   `MachineDeployment` of workers.** High-availability control planes
-  (`KairosControlPlane.spec.replicas` greater than 1) are out of scope for
-  this provider; nothing here prevents claiming more control-plane nodes, but
-  the multi-control-plane join path has not been validated against a fleet.
+  (`replicas` greater than 1) are out of scope for this provider; nothing here
+  prevents claiming more control-plane nodes, but a control plane of more than
+  one Machine has not been validated against a fleet.
 - **Addresses come from the agent, and are only as good as what it
   reports.** `status.addresses` leads with a `Hostname` address derived from
   the node's hostname and then mirrors AuroraBoot's `addresses` list, which the
@@ -208,14 +232,16 @@ and reboot commands, command list, release).
   load-balancer allocation; you provide and manage it.
 - **Delete always releases, never resets.** See "Delete: release versus
   reset" above.
-- **k0s fleet support is newer than k3s.** Both distributions self-discover
-  the providerID (see "providerID" above); k3s is the reference path and the
-  most exercised. Prefer k3s if in doubt.
+- **k0s has seen less use than k3s.** Both were validated on real hardware
+  (release notes v0.1.0 and v0.1.2); k3s is the reference path and the most
+  exercised. Prefer k3s if in doubt.
 - **Group selection is a single named group.** There is no label or
   capability selector over nodes; `KairosFleetMachine.spec.group` names one
   AuroraBoot group directly.
-- **The fleet flow is not covered by automated end-to-end tests yet.** The
-  `test-e2e` CI job is the kubebuilder scaffold placeholder (deploys the
-  manager to kind and checks it starts); it does not exercise claim,
-  apply-cloud-config, reboot, or rejoin against a real AuroraBoot instance. It
-  runs on manual dispatch only and does not gate pull requests.
+- **The fleet flow is not covered by an end-to-end test against a real
+  AuroraBoot.** The `test-e2e` CI job is the kubebuilder scaffold placeholder
+  (deploys the manager to kind and checks that it starts and serves metrics);
+  it does not exercise claim, apply-cloud-config, reboot, or rejoin. It runs on
+  manual dispatch only and does not gate pull requests. The envtest suite
+  includes a lifecycle test that drives the controller through the whole flow
+  against an in-memory AuroraBoot server.

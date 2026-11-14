@@ -46,7 +46,9 @@ and no migration steps from v0.1.3. See the
 ### Changed
 
 - The release workflow starts with an OSV scan of the tagged tree and stops
-  on any finding, and no longer restores Actions caches. (#60)
+  on a finding the scanner fails on (findings marked uncalled pass), and no
+  longer restores Actions caches. (#60) (Corrected 2026-11-14: this said any
+  finding stops the release.)
 - The pull-request OSV scan reports only what a change introduces. (#44)
 - The `Dockerfile` pins its frontend by digest. (#55, #57)
 - The lint job runs on Go 1.27 with golangci-lint v2.15.0; `go.mod`'s `go`
@@ -150,10 +152,11 @@ no migration steps from v0.1.1. See the
 ### Documentation
 
 - The AuroraBoot `phonehome.allowed_commands` prerequisite is documented. This
-  provider issues `apply-cloud-config`, `reboot` and `reset`, but AuroraBoot's
+  provider issues `apply-cloud-config` and `reboot`, but AuroraBoot's
   install-agent enrolment script defaults to a narrower policy that excludes
-  `apply-cloud-config` and `reset`, so a node enrolled the documented way fails
-  its very first bootstrap apply. Both ways to enrol correctly, and the repair
+  `apply-cloud-config`, so a node enrolled the documented way fails its very
+  first bootstrap apply. (Corrected 2026-11-14: this listed `reset`, which no
+  release of this provider has sent.) Both ways to enrol correctly, and the repair
   for an already-enrolled node, are in the quickstart and install guide.
 - The worker join-token Secret has its own quickstart step, with the k0s
   equivalent (`workerTokenSecretRef` from `k0s token create --role worker`).
@@ -217,8 +220,9 @@ Initial release.
   kinds), satisfying the Cluster API v1beta2 infrastructure contract.
 - The full claim, apply-cloud-config, reboot, rejoin, release lifecycle
   against a real AuroraBoot fleet API.
-- `providerID` self-discovery for k3s, deriving `kairos-fleet://<node-id>`
-  from the Kairos phone-home agent's persisted credentials.
+- The `kairos-fleet://<node-id>` providerID for k3s nodes; the node side is
+  implemented by the Kairos bootstrap provider. (Corrected 2026-11-14: this
+  credited this provider with the node-side discovery.)
 - `clusterctl` installability: `metadata.yaml`, a default
   `cluster-template.yaml`, and a release pipeline publishing
   `infrastructure-components.yaml` with the controller image pinned by

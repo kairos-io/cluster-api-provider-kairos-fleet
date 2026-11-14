@@ -1,7 +1,8 @@
 # API reference
 
-> Last verified against: cluster-api-provider-kairos-fleet v0.1.4,
-> API group `infrastructure.cluster.x-k8s.io/v1alpha1`.
+> Last verified against: cluster-api-provider-kairos-fleet v0.1.4 (CRDs in
+> `config/crd/bases/` and controllers at the v0.1.4 tag), API group
+> `infrastructure.cluster.x-k8s.io/v1alpha1`.
 
 A hand-written field reference for the four Kairos Fleet API kinds. For the
 generated schema (types, validation, defaults), use `kubectl explain` against
@@ -16,8 +17,9 @@ The infrastructure side of a Cluster API `Cluster`.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
-| `controlPlaneEndpoint.host` | string | Only if `controlPlaneEndpoint` is set | Host of the workload cluster's API server. Operator-supplied; this provider does not allocate it. |
-| `controlPlaneEndpoint.port` | int32 | Only if `controlPlaneEndpoint` is set | Port of the workload cluster's API server. |
+| `controlPlaneEndpoint` | object | No | Endpoint of the workload cluster's API server. Operator-supplied; this provider does not allocate it. The object has no required fields in the schema, but the `KairosFleetCluster` does not become provisioned until `host` is set. |
+| `controlPlaneEndpoint.host` | string | No (needed for provisioned) | Host of the workload cluster's API server. |
+| `controlPlaneEndpoint.port` | int32 | No | Port of the workload cluster's API server, 1 to 65535. The default template sets 6443. |
 | `auroraboot.url` | string | Yes | Base URL of the AuroraBoot fleet API. |
 | `auroraboot.adminTokenSecretRef.name` | string | Yes | Name of a Secret in the same namespace holding the AuroraBoot admin bearer token under its `token` data key. |
 
@@ -38,8 +40,8 @@ AuroraBoot node.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
-| `group` | string | Yes | AuroraBoot group to claim a node from. Accepts either the group's name or its ID; the controller resolves it to the ID before claiming. Must already exist and hold unclaimed, enrolled nodes; a name that does not (yet) resolve is a transient `GroupNotFound` wait, not a terminal failure. |
-| `providerID` | string | No, set by the controller | `kairos-fleet://<node-id>` once a node is claimed and confirmed rejoined. Immutable once set; do not set it yourself. |
+| `group` | string | Yes | AuroraBoot group to claim a node from. Accepts either the group's name or its ID; the controller resolves it to the ID before claiming. Must already exist and hold unclaimed, enrolled nodes; a name that does not (yet) resolve is a transient `GroupNotFound` wait, not a terminal failure. Only read while no node is claimed; changing it afterwards does not move the machine. |
+| `providerID` | string | No, set by the controller | `kairos-fleet://<node-id>` once a node is claimed and confirmed rejoined. Do not set it yourself: the controller writes it, and the CRD does not enforce immutability or reject a user-supplied value. |
 
 ### status
 

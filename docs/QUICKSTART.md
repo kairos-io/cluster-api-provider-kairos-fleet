@@ -2,7 +2,8 @@
 
 > Last verified against: cluster-api-provider-kairos-fleet v0.1.4,
 > Cluster API v1.13.4 (v1beta2 contract), Kairos v4.1.2, k3s (k0s also
-> supported).
+> supported). The steps were checked against the code and the template; they
+> were not re-run on hardware for this revision.
 
 This walks through provisioning a Kairos fleet-backed workload cluster end to
 end: a single control-plane machine and one worker, claimed from an
@@ -27,11 +28,13 @@ AuroraBoot fleet.
   will be reachable on. This provider does not allocate one: use a kube-vip
   VIP, a load balancer, or a DNS name you manage, pointed at the
   control-plane node once it is up.
-- Both k3s and k0s have fleet providerID self-discovery implemented (see
-  [ARCHITECTURE.md](ARCHITECTURE.md#providerid)). This quickstart uses
-  `distribution: k3s`, the reference and most-exercised path, matching the
-  default template. To use k0s instead, set `distribution: k0s` on the
-  `KairosControlPlane` and on both `KairosConfigTemplate`s (see
+- Nodes whose kubelet registers with the providerID
+  `kairos-fleet://<node-id>` (see
+  [ARCHITECTURE.md](ARCHITECTURE.md#providerid)). That is a contract with the
+  node and its bootstrap data, which this provider does not control. This
+  quickstart uses `distribution: k3s`, the reference and most-exercised path,
+  matching the default template. To use k0s instead, set `distribution: k0s`
+  on the `KairosControlPlane` and on both `KairosConfigTemplate`s (see
   `templates/cluster-template.yaml`).
 - AuroraBoot nodes enrolled with a `phonehome.allowed_commands` policy that
   permits `apply-cloud-config` and `reboot`. AuroraBoot's install-agent
@@ -84,16 +87,15 @@ policy does not need to allow it. Earlier versions of this guide listed it.
 
 ### Fixing an already-enrolled node
 
-If a node was already enrolled with the default policy, append the missing
-entries to the `phonehome` block in `/oem/90_custom.yaml` on the node, then
-restart the phonehome agent so it re-reads the policy:
+If a node was already enrolled with the default policy, add the missing
+entries to `phonehome.allowed_commands` on the node. The install-agent script
+writes that block to `/oem/phonehome.yaml`; a node whose phonehome settings
+come from its own cloud-config keeps them wherever that file defines them. Then
+restart the phonehome agent so it picks up the change:
 
 ```bash
 systemctl restart kairos-agent-phonehome
 ```
-
-The agent reads `phonehome.allowed_commands` once at start; editing the file
-without restarting the service does not take effect.
 
 ## 1. Create the AuroraBoot admin-token Secret
 
@@ -114,8 +116,11 @@ environment.
 
 ## 2. Set the cluster variables
 
-`clusterctl generate cluster` reads these from the environment (or a
-`--from` values file). All but `CLUSTER_NAME`, `AURORABOOT_URL`, and
+`clusterctl generate cluster` reads these from the environment or its
+`clusterctl.yaml`. `KUBERNETES_VERSION`, `CONTROL_PLANE_MACHINE_COUNT` and
+`WORKER_MACHINE_COUNT` are set by the `--kubernetes-version`,
+`--control-plane-machine-count` and `--worker-machine-count` flags in step 3.
+Of the rest, all but `CLUSTER_NAME`, `AURORABOOT_URL`, and
 `CONTROL_PLANE_ENDPOINT_HOST` have defaults, defined in
 `templates/cluster-template.yaml`:
 
@@ -124,7 +129,7 @@ environment.
 | `CLUSTER_NAME` | (required) | Name stamped onto the Cluster and its infrastructure/control-plane/bootstrap resources. |
 | `AURORABOOT_URL` | (required) | Base URL of the AuroraBoot fleet API, for example `https://auroraboot.example.com:8080`. |
 | `AURORABOOT_TOKEN_SECRET` | `auroraboot-admin-token` | Name of the Secret created in step 1. |
-| `K3S_TOKEN_SECRET_NAME` | `${CLUSTER_NAME}-k3s-token` | Name of the Secret holding the k3s server join token, referenced by the worker `KairosConfigTemplate`'s `k3sTokenSecretRef` (key `token`). Not created automatically; see step 5. |
+| `K3S_TOKEN_SECRET_NAME` | `${CLUSTER_NAME}-k3s-token` | Name of the Secret holding the k3s server token, referenced by the worker `KairosConfigTemplate`'s `k3sTokenSecretRef` (key `token`). Not created automatically; see step 5. |
 | `CONTROL_PLANE_ENDPOINT_HOST` | (required) | Host of the workload cluster's API endpoint. |
 | `CONTROL_PLANE_ENDPOINT_PORT` | `6443` | Port of the workload cluster's API endpoint. |
 | `FLEET_CONTROL_PLANE_GROUP` | `control-plane` | Name (or ID) of the AuroraBoot group the control-plane machine is claimed from; resolved to the group's ID before claiming. |
@@ -143,7 +148,7 @@ export CONTROL_PLANE_ENDPOINT_HOST=203.0.113.10
 ```bash
 clusterctl generate cluster "$CLUSTER_NAME" \
   --target-namespace demo \
-  --infrastructure kairos-fleet \
+  --infrastructure kairos-io-fleet \
   --kubernetes-version v1.34.0 \
   --control-plane-machine-count 1 \
   --worker-machine-count 1 > cluster.yaml
@@ -151,10 +156,13 @@ clusterctl generate cluster "$CLUSTER_NAME" \
 kubectl apply -f cluster.yaml
 ```
 
-`--kubernetes-version` is the workload cluster's Kubernetes version; it is
-bounded by the k3s version the target Kairos image ships, not by this
-provider. v1.34.0 is the template's own example; adjust it to what your
-Kairos image actually ships.
+`--kubernetes-version` fills the version fields in the template. This provider
+does not install or select a Kubernetes version: the workload cluster runs
+whatever k3s or k0s version the Kairos image ships. v1.34.0 is the template's
+own example; set it to the version your Kairos image ships.
+
+With `clusterctl` v1.13 or v1.14 the `kairos-io-fleet` name must be registered
+in `clusterctl.yaml` first; see [INSTALL.md](INSTALL.md).
 
 ## 4. Watch provisioning
 
@@ -167,7 +175,7 @@ kubectl get kairosfleetmachines -n demo -w
 
 | Reason | Meaning |
 | --- | --- |
-| `WaitingForBootstrapData` | Waiting for the Kairos bootstrap provider to publish the cloud-config Secret. |
+| `WaitingForBootstrapData` | `Machine.spec.bootstrap.dataSecretName` is not set yet. The machine continues once it is. |
 | `WaitingForClusterInfrastructure` | The `KairosFleetCluster` does not exist yet, or reading its admin-token Secret failed in a way that can clear on its own. |
 | `WaitingForAuroraBootSecret` | The admin-token Secret the `KairosFleetCluster` names does not exist yet. Creating it (step 1) is enough. |
 | `AuroraBootConnectionIncomplete` | The connection cannot work as written: the `KairosFleetCluster` has no `auroraboot.url`, or the admin-token Secret has no `token` key. Waiting does not fix it; edit the `KairosFleetCluster` or the Secret. The condition message names which. |
@@ -190,16 +198,17 @@ machine that reaches `NodeMissing` has failed terminally
 (`status.failureReason` / `status.failureMessage` are set); inspect the
 AuroraBoot node's command history and re-create the Machine.
 
-A worker machine that stays at `WaitingForBootstrapData` past this point is
-most likely waiting on the join-token Secret created in step 5 below; that
-is expected, not a failure.
+A worker machine that stays at `WaitingForBootstrapData` after the
+control-plane machine is `Provisioned` is expected until the join-token Secret
+from step 5 below exists, because the default template's worker
+`KairosConfigTemplate` references it.
 
 ## 5. Create the worker join-token Secret
 
-The worker `KairosConfigTemplate` in the default template joins the running
-k3s cluster using a `k3sTokenSecretRef`, pointing at the Secret named by
-`K3S_TOKEN_SECRET_NAME` (default `${CLUSTER_NAME}-k3s-token`, key `token`).
-This Secret does not exist until you create it, and its value comes from the
+The worker `KairosConfigTemplate` in the default template references a
+`k3sTokenSecretRef` pointing at the Secret named by `K3S_TOKEN_SECRET_NAME`
+(default `${CLUSTER_NAME}-k3s-token`, key `token`). This Secret does not exist
+until you create it, and its value is the k3s server token read from the
 control-plane node, so create it once the control-plane `KairosFleetMachine`
 reaches `Provisioned` in step 4 above:
 
@@ -214,15 +223,22 @@ kubectl create secret generic "${CLUSTER_NAME}-k3s-token" \
   --from-literal=token="<value from the command above>"
 ```
 
-Until this Secret exists, the bootstrap provider cannot render the worker's
-cloud-config, so the worker's `KairosFleetMachine` stays at
-`WaitingForBootstrapData`. Once the Secret exists, provisioning continues
-with no further action.
+The worker's `KairosFleetMachine` stays at `WaitingForBootstrapData` until
+its `Machine` has `spec.bootstrap.dataSecretName` set. To check:
+
+```bash
+kubectl get machines -n demo \
+  -o custom-columns=NAME:.metadata.name,DATASECRET:.spec.bootstrap.dataSecretName
+```
+
+If the field is still empty after the Secret exists, the bootstrap provider
+has not published the data; see the Kairos bootstrap provider's documentation
+and logs.
 
 If you set `distribution: k0s` instead of the default k3s (see Prerequisites
-above), generate a worker join token on the control-plane node with `k0s
-token create --role worker` instead, and change the worker
-`KairosConfigTemplate` in the generated `cluster.yaml` to use
+above), generate a worker token on the control-plane node with `k0s token
+create --role worker` instead, store it under the key `token` in a Secret, and
+change the worker `KairosConfigTemplate` in the generated `cluster.yaml` to use
 `workerTokenSecretRef` in place of `k3sTokenSecretRef`.
 
 ## 6. Retrieve the kubeconfig and confirm the node joined correctly
@@ -230,16 +246,16 @@ token create --role worker` instead, and change the worker
 ```bash
 clusterctl get kubeconfig "$CLUSTER_NAME" -n demo > demo-kubeconfig.yaml
 
-kubectl get kairosfleetmachine -n demo -o jsonpath='{.items[0].spec.providerID}'
-kubectl --kubeconfig demo-kubeconfig.yaml get nodes -o jsonpath='{.items[0].spec.providerID}'
+kubectl get kairosfleetmachines -n demo
+kubectl --kubeconfig demo-kubeconfig.yaml get nodes \
+  -o custom-columns=NAME:.metadata.name,PROVIDERID:.spec.providerID
 ```
 
-Both commands should print the same `kairos-fleet://<node-id>` value. If they
-do not match, the workload Node never registers against the right Machine and
-the Machine stays unhealthy; see
-[ARCHITECTURE.md](ARCHITECTURE.md#providerid) for the self-discovery
-mechanism this depends on (the Kairos phone-home agent must be running on the
-node image, with persisted credentials).
+Each `kairos-fleet://<node-id>` value in the `PROVIDERID` column of the first
+command should appear in the second. If a value does not match, Cluster API
+does not link the Machine to its Node; see
+[ARCHITECTURE.md](ARCHITECTURE.md#providerid) for what this provider expects
+of the node.
 
 ## 7. Tear down
 
@@ -277,11 +293,13 @@ AuroraBoot.
   default rather than adding to it. Add `reboot` and restart the phonehome
   agent; the controller issues a fresh reboot about once a minute.
 - **Worker machine stuck at `WaitingForBootstrapData` after the
-  control-plane machine reaches `Provisioned`.** The worker's
-  `KairosConfigTemplate` needs a join-token Secret
-  (`K3S_TOKEN_SECRET_NAME`/`k3sTokenSecretRef` for k3s,
+  control-plane machine reaches `Provisioned`.** The Machine's
+  `spec.bootstrap.dataSecretName` is empty. The default template's worker
+  `KairosConfigTemplate` references a
+  join-token Secret (`K3S_TOKEN_SECRET_NAME`/`k3sTokenSecretRef` for k3s,
   `workerTokenSecretRef` for k0s) that this quickstart does not create until
-  step 5. Create it and provisioning continues with no further action.
+  step 5. Create it first. If the field stays empty, look at the Kairos
+  bootstrap provider.
 - **Machine stuck at `WaitingForClusterInfrastructure`.** The Cluster's
   `KairosFleetCluster` does not exist, or the controller cannot read the
   admin-token Secret. Check that the `KairosFleetCluster` named by the
@@ -299,12 +317,13 @@ AuroraBoot.
   a node yet, `resolving group ...`). Check that the URL is reachable from
   the controller pod.
 - **Machine stuck at `GroupNotFound`.** `spec.group` does not resolve to an
-  AuroraBoot group by name or ID. Check the value:
-  `kubectl get kairosfleetmachine -n demo -o jsonpath='{.items[0].spec.group}'`,
-  and confirm a group with that exact name (or ID) exists in AuroraBoot.
+  AuroraBoot group by name or ID. Check the `GROUP` column of
+  `kubectl get kairosfleetmachines -n demo`, and confirm a group with that
+  exact name (or ID) exists in AuroraBoot.
 - **Machine stuck at `WaitingForCapacity`.** The target group has no
-  unclaimed nodes. Confirm the group name matches an AuroraBoot group with
-  enrolled nodes: `kubectl get kairosfleetmachine -n demo -o jsonpath='{.items[0].spec.group}'`.
+  unclaimed nodes. Confirm the `GROUP` column of
+  `kubectl get kairosfleetmachines -n demo` names an AuroraBoot group with
+  enrolled, unclaimed nodes.
 - **KairosFleetCluster never reports `Provisioned`.** Its `Ready` condition
   reason says what it is waiting on. `AuroraBootConnectionNotReady`:
   `spec.auroraboot.url` is empty, or the admin-token Secret is missing,
@@ -317,10 +336,11 @@ AuroraBoot.
   newer than the recorded reboot time. Check that the AuroraBoot node's
   `lastHeartbeat` is advancing; a node that never phones home after reboot
   (agent not running, network unreachable) will not satisfy the gate.
-- **Workload Node has no `providerID`, or it does not match
-  `kairos-fleet://...`.** The bootstrap cloud-config must include the fleet
-  providerID self-discovery path (implemented for k3s and k0s in the Kairos
-  bootstrap provider). Confirm the `KairosConfigTemplate` distribution matches
-  your Kairos image (this quickstart uses k3s; k0s also works, see
-  [ARCHITECTURE.md](ARCHITECTURE.md#providerid)) and that the node image runs
-  the Kairos phone-home agent with persisted credentials.
+- **Workload Node has no `providerID`, or it does not match the
+  `KairosFleetMachine`'s `kairos-fleet://...` value.** This provider only sets
+  the value on the `KairosFleetMachine`; the node's kubelet has to register
+  with the same string (see [ARCHITECTURE.md](ARCHITECTURE.md#providerid)).
+  Confirm the `distribution` in the template's `KairosConfigTemplate` and
+  `KairosControlPlane` matches what your Kairos image ships, then look at the
+  Kairos bootstrap provider's documentation for how the node derives its
+  providerID.
