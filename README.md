@@ -18,27 +18,27 @@ that phone home to AuroraBoot.
 
 ## Status
 
-Stable, v1alpha1 API. First usable release: v0.1.0.
-
-`v0.1.0-beta.1` is superseded and must not be used: its generated metrics
-Service name exceeded Kubernetes' 63-character limit, so `clusterctl init`
-could not apply it, and even a manually patched install crash-looped on a
-real management cluster because the manager's scheme never registered the
-Cluster API core types. v0.1.0 fixes both, plus a group-claim bug where
-`spec.group` names were passed straight to AuroraBoot's UUID-keyed claim
-endpoint and always failed. See
-[docs/release-notes/v0.1.0.md](docs/release-notes/v0.1.0.md) for the full
-list of fixes.
+**Latest release:**
+[`v0.1.4`](https://github.com/kairos-io/cluster-api-provider-kairos-fleet/releases/tag/v0.1.4).
+Pre-1.0: the `v1alpha1` API may still change before v1.0. Read the
+[v0.1.4 release notes](docs/release-notes/v0.1.4.md) before installing or
+upgrading. Do not use `v0.1.0-beta.1`, which cannot be installed with
+`clusterctl`; v0.1.0 was the first usable release.
 
 The exercised topology is a single control-plane machine plus a
 `MachineDeployment` of worker machines, claimed from named AuroraBoot groups.
 It has been validated end to end on real hardware for both k3s and k0s
 workload clusters, together with the [Kairos bootstrap and control-plane
 providers](https://github.com/kairos-io/cluster-api-provider-kairos) at
-v0.1.3. That validation predates v0.1.4, whose fixes are covered by the unit
-and envtest suites rather than a new hardware run. High-availability control
-planes (`replicas` greater than 1) are out of scope for this provider. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full design
-and current limitations, and [docs/QUICKSTART.md](docs/QUICKSTART.md) to
+v0.1.3. That validation predates this provider's v0.1.4, whose fixes are
+covered by the unit and envtest suites rather than a new hardware run. This
+repository records no hardware validation with a later release of the Kairos
+bootstrap and control-plane providers. Nothing in this provider limits the
+number of control-plane machines, but a control plane of more than one
+Machine has not been validated against a fleet.
+
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full design and
+current limitations, and [docs/QUICKSTART.md](docs/QUICKSTART.md) to
 provision a cluster.
 
 ## API types
@@ -83,15 +83,28 @@ The names in parentheses are the `clusterctl` provider names. See
 | Component | Version |
 | --- | --- |
 | Cluster API | v1.13.x (v1beta2 contract) |
-| Kubernetes, management cluster | Supported v1.32 to v1.36 (the Cluster API v1.13 range; v1.36 needs Cluster API v1.13.1 or later). Automated tests run against v1.35 (envtest, from the `k8s.io/api` v0.35 dependency) and v1.36.1 (the manual kind e2e placeholder, kind v0.32.0 default node image). Other versions in the range are not exercised by this repository. |
+| Kubernetes, management cluster | v1.32 to v1.36, the Cluster API v1.13 range (v1.36 needs Cluster API v1.13.1 or later). CI runs the envtest suite against v1.35; [CONTRIBUTING.md](CONTRIBUTING.md#tests) lists what each test covers. |
 | Kubernetes, workload cluster | Chosen per cluster. Supported range v1.30 to v1.36 (Cluster API v1.13), further bounded by the k3s or k0s version the chosen Kairos image ships. |
-| Kairos | v4.1.2 (the v4.x line) |
+| Kairos | v4.1.2, the version validated on hardware |
 | Distribution | k3s and k0s. Both were validated on real hardware; k3s is the reference path and the most exercised. The distribution is chosen in the Kairos bootstrap provider's resources, not in this provider's. |
-| AuroraBoot | Fleet API (`/api/v1`): group list and claim, node get, the apply-cloud-config and reboot node commands and their outcome, release. No AuroraBoot version is pinned. |
+| AuroraBoot | v0.27.0 or later, the first release with the group claim and release endpoints this provider calls. It uses the fleet API (`/api/v1`): group list and claim, node get, the `apply-cloud-config` and `reboot` node commands and their outcome, and release. |
 | Provider API | v1alpha1 (`infrastructure.cluster.x-k8s.io`) |
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full version
 rationale and known limitations.
+
+## Install
+
+The provider's `clusterctl` name is `kairos-io-fleet`. `clusterctl` v1.15
+knows it built in; with `clusterctl` v1.13 or v1.14, add the one-time
+`clusterctl.yaml` entry from [docs/INSTALL.md](docs/INSTALL.md) first. Then:
+
+```bash
+clusterctl init \
+  --infrastructure kairos-io-fleet \
+  --bootstrap kairos-io \
+  --control-plane kairos-io
+```
 
 ## Getting started
 

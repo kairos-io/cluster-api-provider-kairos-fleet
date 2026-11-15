@@ -3,7 +3,7 @@
 # Render with:
 #   clusterctl generate cluster <name> \
 #     --infrastructure kairos-io-fleet \
-#     --kubernetes-version v1.34.0 \
+#     --kubernetes-version v1.36.1 \
 #     --control-plane-machine-count 1 --worker-machine-count 1 > cluster.yaml
 #
 # A fleet cluster composes three providers: this infrastructure provider
