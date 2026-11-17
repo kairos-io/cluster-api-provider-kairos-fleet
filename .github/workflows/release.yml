@@ -30,11 +30,12 @@ jobs:
   # red anywhere.
   #
   # The pin below is the same google/osv-scanner-action commit osv-scanner.yml
-  # pins (b1d267ae, the v2.7.0 tag); bump them together. The reusable workflows
-  # there call the action at 0a65f82, an ancestor whose osv-scanner-action/
-  # action.yml is identical, with the same default arguments ("-r ./"). The
-  # scanner loads an osv-scanner.toml found next to a scanned manifest by
-  # itself, so an ignore added there applies to both scans.
+  # pins, the one the upstream release tag points to; bump them together. The
+  # reusable workflows there call the action at an ancestor commit of the same
+  # release whose osv-scanner-action/action.yml is identical, with the same
+  # default arguments ("-r ./"). The scanner loads an osv-scanner.toml found
+  # next to a scanned manifest by itself, so an ignore added there applies to
+  # both scans.
   #
   # The scan reads the tagged tree, not main: the release is what ships. The
   # trade-off is that an ignore added in the tagged commit silences this gate,
