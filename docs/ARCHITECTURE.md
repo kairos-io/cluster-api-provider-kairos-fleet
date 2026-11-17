@@ -211,10 +211,9 @@ request has a 30 second timeout.
 ## v0.1 limitations
 
 - **The exercised topology is one control-plane machine plus a
-  `MachineDeployment` of workers.** High-availability control planes
-  (`replicas` greater than 1) are out of scope for this provider; nothing here
-  prevents claiming more control-plane nodes, but a control plane of more than
-  one Machine has not been validated against a fleet.
+  `MachineDeployment` of workers.** Nothing in this provider limits the number
+  of control-plane machines, but a control plane of more than one Machine has
+  not been validated against a fleet.
 - **Addresses come from the agent, and are only as good as what it
   reports.** `status.addresses` leads with a `Hostname` address derived from
   the node's hostname and then mirrors AuroraBoot's `addresses` list, which the

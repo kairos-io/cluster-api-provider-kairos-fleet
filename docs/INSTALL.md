@@ -1,8 +1,11 @@
 # Install
 
 > Last verified against: cluster-api-provider-kairos-fleet v0.1.4,
-> Cluster API v1.13.4 (v1beta2 contract), clusterctl v1.13.4, release
-> pipeline in `.github/workflows/release.yml`.
+> Cluster API v1.13.4 (v1beta2 contract), clusterctl v1.13.4. Step 1 was run
+> on 2026-11-15: `clusterctl generate provider` fetched and rendered the
+> v0.1.4 release assets through the `latest` URL, and through the pinned
+> `v0.1.4` URL with `GOPROXY=off`. `clusterctl init` was not re-run against a
+> management cluster for this revision.
 
 This registers the Kairos Fleet infrastructure provider with `clusterctl` and
 installs it into a management cluster. The provider's `clusterctl` name is
@@ -25,6 +28,8 @@ not needed there.
 - Network access from your workstation (or wherever `clusterctl init` runs)
   to `github.com`, to fetch the release assets, or a local/air-gapped
   clusterctl override repository if you mirror releases internally.
+- AuroraBoot v0.27.0 or later, the first release with the group claim and
+  release endpoints this provider calls.
 - AuroraBoot nodes enrolled with a `phonehome.allowed_commands` policy that
   permits `apply-cloud-config` and `reboot`, the two node commands this
   provider issues. AuroraBoot's install-agent enrolment script defaults to

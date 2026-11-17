@@ -2,8 +2,9 @@
 
 > Last verified against: cluster-api-provider-kairos-fleet v0.1.4,
 > Cluster API v1.13.4 (v1beta2 contract), Kairos v4.1.2, k3s (k0s also
-> supported). The steps were checked against the code and the template; they
-> were not re-run on hardware for this revision.
+> supported). The steps were checked against the code and the template, and
+> step 3's `clusterctl generate cluster` was run against the v0.1.4 release
+> on 2026-11-15; they were not re-run on hardware for this revision.
 
 This walks through provisioning a Kairos fleet-backed workload cluster end to
 end: a single control-plane machine and one worker, claimed from an
@@ -18,7 +19,8 @@ AuroraBoot fleet.
   registered and installed yet, do that first: [INSTALL.md](INSTALL.md).
 - The `clusterctl` CLI, matching the Cluster API version installed in the
   management cluster.
-- An AuroraBoot instance reachable from the management cluster, with:
+- An AuroraBoot instance, v0.27.0 or later, reachable from the management
+  cluster, with:
   - an admin bearer token,
   - at least one enrolled, unclaimed node in a control-plane group (default
     name `control-plane`),
@@ -149,7 +151,7 @@ export CONTROL_PLANE_ENDPOINT_HOST=203.0.113.10
 clusterctl generate cluster "$CLUSTER_NAME" \
   --target-namespace demo \
   --infrastructure kairos-io-fleet \
-  --kubernetes-version v1.34.0 \
+  --kubernetes-version v1.36.1 \
   --control-plane-machine-count 1 \
   --worker-machine-count 1 > cluster.yaml
 
@@ -158,8 +160,8 @@ kubectl apply -f cluster.yaml
 
 `--kubernetes-version` fills the version fields in the template. This provider
 does not install or select a Kubernetes version: the workload cluster runs
-whatever k3s or k0s version the Kairos image ships. v1.34.0 is the template's
-own example; set it to the version your Kairos image ships.
+whatever k3s or k0s version the Kairos image ships, so set it to that version.
+v1.36.1 is an example.
 
 With `clusterctl` v1.13 or v1.14 the `kairos-io-fleet` name must be registered
 in `clusterctl.yaml` first; see [INSTALL.md](INSTALL.md).
